@@ -11,23 +11,10 @@ const StartToken Token = math.MinInt64
 // Represents a partition token
 type Token int64
 
-// Represents an index in the token range
-type RangeIndex uint8
-
-// Represents slices of the token range between two tokens
-type TokenRanges struct {
-	Token   Token
-	Indices []RangeIndex
-}
-
 const maxRingSize = 12288 // 3*math.Pow(2, 12)
 const chunkSizeUnit = math.MaxUint64 / maxRingSize
 
 func (t Token) String() string {
-	return fmt.Sprintf("%d", t)
-}
-
-func (t RangeIndex) String() string {
 	return fmt.Sprintf("%d", t)
 }
 

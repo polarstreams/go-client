@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/barcostreams/go-client/models"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"golang.org/x/net/http2"
@@ -23,6 +25,9 @@ const (
 	partitionKeyT1Range = "567"
 	partitionKeyT2Range = "234"
 )
+
+const reconnectionDelay = 20 * time.Millisecond
+const additionalTestDelay = 500 * time.Millisecond
 
 func Test(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -81,7 +86,7 @@ var _ = Describe("Client", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(client.Connect()).NotTo(HaveOccurred())
 			defer client.Close()
-			Expect(client.Topology()).To(Equal(Topology{
+			Expect(client.Topology()).To(Equal(&Topology{
 				BaseName:     baseName,
 				Length:       11,
 				ProducerPort: 8091,
@@ -102,63 +107,164 @@ var _ = Describe("Client", func() {
 		})
 	})
 
-	Describe("ProduceJson()", func() {
-		var discoveryServer *httptest.Server
-		var s0, s1, s2 *http.Server
-		var c0, c1, c2 chan string
-		topology := Topology{
-			Length:       3,
-			BrokerNames:  []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"},
-			ProducerPort: 8091,
-			ConsumerPort: 8092,
-		}
-		discoveryAddress := ""
+	Context("With a healthy cluster", func ()  {
+		Describe("ProduceJson()", func() {
+			var discoveryServer *httptest.Server
+			var s0, s1, s2 *http.Server
+			var c0, c1, c2 chan string
+			topology := Topology{
+				Length:       3,
+				BrokerNames:  []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"},
+				ProducerPort: 8091,
+				ConsumerPort: 8092,
+			}
+			discoveryAddress := ""
 
-		BeforeEach(func() {
-			discoveryServer = NewDiscoveryServer(topology)
-			discoveryAddress = discoveryServer.URL[7:] // Remove http://
-			s0, c0 = NewProducerServerWithChannel("127.0.0.1:8091")
-			s1, c1 = NewProducerServerWithChannel("127.0.0.2:8091")
-			s2, c2 = NewProducerServerWithChannel("127.0.0.3:8091")
+			BeforeEach(func() {
+				discoveryServer = NewDiscoveryServer(topology)
+				discoveryAddress = discoveryServer.URL[7:] // Remove http://
+				s0, c0 = NewProducerServerWithChannel("127.0.0.1:8091")
+				s1, c1 = NewProducerServerWithChannel("127.0.0.2:8091")
+				s2, c2 = NewProducerServerWithChannel("127.0.0.3:8091")
+			})
+
+			AfterEach(func() {
+				discoveryServer.Close()
+				s0.Shutdown(context.Background())
+				s1.Shutdown(context.Background())
+				s2.Shutdown(context.Background())
+			})
+
+			It("should send a request to each host in round robin", func() {
+				client := newTestClient(discoveryAddress)
+				defer client.Close()
+
+				produceJson(client, `{"key0": "value0"}`, "")
+				produceJson(client, `{"key1": "value1"}`, "")
+				produceJson(client, `{"key2": "value2"}`, "")
+
+				Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0"}`}))
+				Expect(drainChan(c1)).To(Equal([]string{`{"key1": "value1"}`}))
+				Expect(drainChan(c2)).To(Equal([]string{`{"key2": "value2"}`}))
+			})
+
+			It("should send a request to each host according to the partition key", func() {
+				client := newTestClient(discoveryAddress)
+				defer client.Close()
+
+				produceJson(client, `{"key0": "value0_0"}`, partitionKeyT0Range)
+				produceJson(client, `{"key0": "value0_1"}`, partitionKeyT0Range)
+				produceJson(client, `{"key0": "value0_2"}`, partitionKeyT0Range)
+				produceJson(client, `{"key2": "value2"}`, partitionKeyT2Range)
+				produceJson(client, `{"key1": "value1"}`, partitionKeyT1Range)
+
+				Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0_0"}`, `{"key0": "value0_1"}`, `{"key0": "value0_2"}`}))
+				Expect(drainChan(c1)).To(Equal([]string{`{"key1": "value1"}`}))
+				Expect(drainChan(c2)).To(Equal([]string{`{"key2": "value2"}`}))
+			})
 		})
+	})
 
-		AfterEach(func() {
-			discoveryServer.Close()
-			s0.Shutdown(context.Background())
-			s1.Shutdown(context.Background())
-			s2.Shutdown(context.Background())
-		})
+	Context("With hosts going up and down", func ()  {
+		Describe("ProduceJson()", func() {
 
-		It("should send a request to each host in round robin", func() {
-			client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(client.Connect()).NotTo(HaveOccurred())
-			defer client.Close()
+			// It("should send a request to each host in round robin", func() {
+			// 	client := newTestClient(discoveryAddress)
+			// 	defer client.Close()
 
-			produceJson(client, `{"key0": "value0"}`, "")
-			produceJson(client, `{"key1": "value1"}`, "")
-			produceJson(client, `{"key2": "value2"}`, "")
+			// 	produceJson(client, `{"key0": "value0"}`, "")
+			// 	produceJson(client, `{"key1": "value1"}`, "")
+			// 	produceJson(client, `{"key2": "value2"}`, "")
 
-			Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0"}`}))
-			Expect(drainChan(c1)).To(Equal([]string{`{"key1": "value1"}`}))
-			Expect(drainChan(c2)).To(Equal([]string{`{"key2": "value2"}`}))
-		})
+			// 	Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0"}`}))
+			// 	Expect(drainChan(c1)).To(Equal([]string{`{"key1": "value1"}`}))
+			// 	Expect(drainChan(c2)).To(Equal([]string{`{"key2": "value2"}`}))
+			// })
 
-		It("should send a request to each host according to the partition key", func() {
-			client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(client.Connect()).NotTo(HaveOccurred())
-			defer client.Close()
+			Context("With a partial online cluster", func ()  {
+				var discoveryServer *httptest.Server
+				var s0, s1, s2 *http.Server
+				var c0, c1, c2 chan string
+				topology := Topology{
+					Length:       3,
+					BrokerNames:  []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"},
+					ProducerPort: 8091,
+					ConsumerPort: 8092,
+				}
+				discoveryAddress := ""
 
-			produceJson(client, `{"key0": "value0_0"}`, partitionKeyT0Range)
-			produceJson(client, `{"key0": "value0_1"}`, partitionKeyT0Range)
-			produceJson(client, `{"key0": "value0_2"}`, partitionKeyT0Range)
-			produceJson(client, `{"key2": "value2"}`, partitionKeyT2Range)
-			produceJson(client, `{"key1": "value1"}`, partitionKeyT1Range)
+				BeforeEach(func() {
+					discoveryServer = NewDiscoveryServer(topology)
+					discoveryAddress = discoveryServer.URL[7:] // Remove http://
+					s1, c1 = NewProducerServerWithChannel("127.0.0.2:8091")
+					s2, c2 = NewProducerServerWithChannel("127.0.0.3:8091")
+				})
 
-			Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0_0"}`, `{"key0": "value0_1"}`, `{"key0": "value0_2"}`}))
-			Expect(drainChan(c1)).To(Equal([]string{`{"key1": "value1"}`}))
-			Expect(drainChan(c2)).To(Equal([]string{`{"key2": "value2"}`}))
+				AfterEach(func() {
+					discoveryServer.Close()
+					s1.Shutdown(context.Background())
+					s2.Shutdown(context.Background())
+					if s0 != nil {
+						s0.Shutdown(context.Background())
+					}
+				})
+
+				It("should route request according to the partition key or use the next host", func() {
+					client := newTestClient(discoveryAddress)
+					defer client.Close()
+
+					// Host 0 is offline
+					produceJson(client, `{"key0": "value0_0"}`, partitionKeyT0Range)
+					produceJson(client, `{"key1": "value1"}`, partitionKeyT1Range)
+
+					Expect(drainChan(c0)).To(Equal([]string{}))
+					// The first message was rerouted to B1
+					Expect(drainChan(c1)).To(Equal([]string{`{"key0": "value0_0"}`, `{"key1": "value1"}`}))
+					Expect(drainChan(c2)).To(Equal([]string{}))
+					t := client.Topology()
+					Expect(client.isProducerUp(0, t)).To(BeFalse())
+					Expect(client.isProducerUp(1, t)).To(BeTrue())
+					Expect(client.isProducerUp(2, t)).To(BeTrue())
+
+					time.Sleep(reconnectionDelay * 2)
+					s0, c0 = NewProducerServerWithChannel("127.0.0.1:8091")
+					time.Sleep(reconnectionDelay + additionalTestDelay)
+					Expect(client.isProducerUp(0, t)).To(BeTrue())
+
+					produceJson(client, `{"key0": "value0_1"}`, partitionKeyT0Range)
+					Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0_1"}`}))
+				})
+
+				It("should reconnect after successful initial connection", func() {
+					s0, c0 = NewProducerServerWithChannel("127.0.0.1:8091")
+					client := newTestClient(discoveryAddress)
+					defer client.Close()
+
+					// Host 0 is offline
+					produceJson(client, `{"key0": "value0_0"}`, partitionKeyT0Range)
+					produceJson(client, `{"key1": "value1"}`, partitionKeyT1Range)
+
+					Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0_0"}`}))
+					Expect(drainChan(c1)).To(Equal([]string{`{"key1": "value1"}`}))
+					Expect(drainChan(c2)).To(Equal([]string{}))
+
+					s0.Shutdown(context.Background())
+					produceJson(client, `{"key0": "value0_1"}`, partitionKeyT0Range)
+					Expect(drainChan(c1)).To(Equal([]string{`{"key0": "value0_1"}`}))
+
+					t := client.Topology()
+					Expect(client.isProducerUp(0, t)).To(BeFalse())
+					Expect(client.isProducerUp(1, t)).To(BeTrue())
+					Expect(client.isProducerUp(2, t)).To(BeTrue())
+
+					s0, c0 = NewProducerServerWithChannel("127.0.0.1:8091")
+					time.Sleep(reconnectionDelay + additionalTestDelay)
+					Expect(client.isProducerUp(0, t)).To(BeTrue())
+
+					produceJson(client, `{"key0": "value0_1"}`, partitionKeyT0Range)
+					Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0_1"}`}))
+				})
+			})
 		})
 	})
 })
@@ -182,9 +288,13 @@ func NewProducerServer(address string, handler http.Handler) *http.Server {
 func NewProducerServerWithChannel(address string) (*http.Server, chan string) {
 	c := make(chan string, 100)
 	server := NewProducerServer(address, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c <- reqBody(r)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte("OK"))
+		if r.URL.Path == "/status" {
+			log.Printf("Broker with address %s received status request", address)
+			return
+		}
+		c <- reqBody(r)
 	}))
 
 	return server, c
@@ -229,4 +339,14 @@ func drainChan(c chan string) []string {
 		}
 	}
 	return result
+}
+
+// Returns a connected client
+func newTestClient(discoveryAddress string) *Client {
+	client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress))
+	Expect(err).NotTo(HaveOccurred())
+	client.logger = models.StdLogger
+	client.fixedReconnectionDelay = reconnectionDelay
+	Expect(client.Connect()).NotTo(HaveOccurred())
+	return client
 }
