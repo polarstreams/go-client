@@ -1,21 +1,28 @@
 package internal
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/net/http2"
 )
 
 const defaultPollInterval = 10 * time.Second
 const discoveryPath = "/v1/brokers"
+const maxOrdinal = 1 << 31
 
 type Client struct {
 	discoveryClient *http.Client
+	producerClient  *http.Client
 	discoveryUrl    string
 	topology        atomic.Value
 	isClosing       int64
@@ -46,14 +53,27 @@ func NewClient(serviceUrl string) (*Client, error) {
 		discoveryClient: &http.Client{
 			Transport: &http.Transport{
 				DisableKeepAlives: true, // Disable pooling to target one host each time
-				MaxConnsPerHost: 1,
+				MaxConnsPerHost:   1,
 			},
 			Timeout: 2 * time.Second,
 		},
-		discoveryUrl: discoveryUrl,
-		topology: atomic.Value{},
-		pollInterval: defaultPollInterval,
-		isClosing: 0,
+		producerClient: &http.Client{
+			Transport: &http2.Transport{
+				StrictMaxConcurrentStreams: true, // One connection per host
+				AllowHTTP:                  true,
+				DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+					// Pretend we are dialing a TLS endpoint.
+					log.Printf("Creating new connection")
+					return net.Dial(network, addr)
+				},
+				ReadIdleTimeout: 1000 * time.Millisecond,
+				PingTimeout:     1000 * time.Millisecond,
+			},
+		},
+		discoveryUrl:  discoveryUrl,
+		topology:      atomic.Value{},
+		pollInterval:  defaultPollInterval,
+		isClosing:     0,
 		producerIndex: 0,
 	}
 
@@ -109,10 +129,17 @@ func (c *Client) queryTopology() (*Topology, error) {
 	return &value, nil
 }
 
-func (c *Client) ProduceJson(topic string, message io.Reader, partitionKey string) {
-	// func (c *TestClient) ProduceJson(ordinal int, topic string, message string, partitionKey string) *http.Response {
-	// 	url := c.ProducerUrl(ordinal, topic, partitionKey)
-	// 	resp, err := c.client.Post(url, "application/json", strings.NewReader(message))
+func (c *Client) ProduceJson(topic string, message io.Reader, partitionKey string) (*http.Response, error) {
+	t := c.Topology()
+	ordinal := 0
+	if partitionKey == "" {
+		ordinal = c.getNextProducerOrdinal(&t)
+	} else {
+		ordinal = c.getNaturalOwner(partitionKey, &t)
+	}
+
+	url := t.ProducerUrl(topic, ordinal, partitionKey)
+	return c.producerClient.Post(url, contentType, message)
 }
 
 func (c *Client) Close() {
@@ -123,6 +150,20 @@ func bodyClose(r *http.Response) {
 	if r != nil && r.Body != nil {
 		r.Body.Close()
 	}
+}
+
+func (c *Client) getNextProducerOrdinal(t *Topology) int {
+	value := atomic.AddUint32(&c.producerIndex, 1)
+	if value >= maxOrdinal {
+		// Atomic inc operations don't wrap around.
+		// Not exactly fair when value >= maxOrdinal, but in practical terms is good enough
+		atomic.StoreUint32(&c.producerIndex, 0)
+	}
+	return (int(value) - 1) % t.Length
+}
+
+func (c *Client) getNaturalOwner(partitionKey string, t *Topology) int {
+	return PrimaryBroker(partitionKey, t.Length)
 }
 
 // Adds a +-5% jitter to the duration with millisecond resolution
