@@ -13,6 +13,8 @@ import (
 
 var endianness = binary.BigEndian
 
+const consumerContentType = "application/vnd.barco.consumermessage"
+
 func unmarshalTopicRecords(r io.Reader) (*TopicRecords, error) {
 	var err error
 	item := &TopicRecords{}
@@ -54,6 +56,9 @@ func unmarshalTopicRecords(r io.Reader) (*TopicRecords, error) {
 func ReadOkResponse(resp *http.Response) ([]TopicRecords, error) {
 	defer resp.Body.Close()
 	var messageLength uint16
+	if resp.ContentLength < 2 || resp.Header.Get("Content-Type") != consumerContentType {
+		return nil, nil
+	}
 	binary.Read(resp.Body, endianness, &messageLength)
 	result := make([]TopicRecords, 0)
 	for i := 0; i < int(messageLength); i++ {

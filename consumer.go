@@ -54,7 +54,7 @@ type consumer struct {
 }
 
 func (c *consumer) Poll() ConsumerPollResult {
-	return ConsumerPollResult{}
+	return c.client.Poll()
 }
 
 func (c *consumer) Close() {

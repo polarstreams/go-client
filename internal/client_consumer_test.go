@@ -38,7 +38,7 @@ var _ = Describe("Client", func() {
 				s2.Shutdown(context.Background())
 			})
 
-			It("Subscribes in each discovered server", func() {
+			It("should subscribe to each discovered server", func() {
 				client := newTestClient(discoveryAddress)
 				defer client.Close()
 				options := ConsumerOptions{
@@ -52,7 +52,7 @@ var _ = Describe("Client", func() {
 				expectRegisterChan(c2, options)
 			})
 
-			It("Re-registers itself when a host goes DOWN and UP", func() {
+			It("should re-registers itself when a host goes DOWN and UP", func() {
 				s0.Shutdown(context.Background())
 				s0 = nil
 
@@ -88,6 +88,59 @@ var _ = Describe("Client", func() {
 			})
 		})
 	})
+
+	Describe("Poll()", func() {
+		var discoveryServer *httptest.Server
+		var s0, s1, s2 *http.Server
+		var c0, c1, c2 chan *http.Request
+		topology := newTestTopology()
+		discoveryAddress := ""
+		consumerOptions := ConsumerOptions{
+			Group:  "g1",
+			Id:     "id1",
+			Topics: []string{"t1"},
+			MaxPollInterval: 3 * time.Second,
+		}
+
+		BeforeEach(func() {
+			discoveryServer = NewDiscoveryServer(topology)
+			discoveryAddress = discoveryServer.URL[7:] // Remove http://
+			s0, c0 = NewConsumerServerWithChannel("127.0.0.1:8092")
+			s1, c1 = NewConsumerServerWithChannel("127.0.0.2:8092")
+			s2, c2 = NewConsumerServerWithChannel("127.0.0.3:8092")
+		})
+
+		AfterEach(func() {
+			discoveryServer.Close()
+			s0.Shutdown(context.Background())
+			s1.Shutdown(context.Background())
+			s2.Shutdown(context.Background())
+		})
+
+		It("should query brokers until it times out", func() {
+			client := newTestClient(discoveryAddress)
+			defer client.Close()
+
+			client.RegisterAsConsumer(consumerOptions)
+			drainRChan(c0)
+			drainRChan(c1)
+			drainRChan(c2)
+
+			start := time.Now()
+			result := client.Poll()
+
+			Expect(result.Error).NotTo(HaveOccurred())
+			Expect(len(drainRChan(c0))).To(BeNumerically(">=", 1))
+			Expect(len(drainRChan(c1))).To(BeNumerically(">=", 1))
+			Expect(len(drainRChan(c2))).To(BeNumerically(">=", 1))
+
+			Expect(time.Since(start)).To(BeNumerically(">=", consumerOptions.MaxPollInterval - 20*time.Millisecond))
+		})
+
+		XIt("should query brokers until there's a successful response")
+
+		XIt("should wait when last full error was recent")
+	})
 })
 
 func NewConsumerServerWithChannel(address string) (*http.Server, chan *http.Request) {
@@ -99,7 +152,7 @@ func NewConsumerServerWithChannel(address string) (*http.Server, chan *http.Requ
 			log.Printf("Broker with address %s received status request", address)
 			return
 		}
-		log.Printf("Received consumer request to %s", r.URL.Path)
+		log.Printf("Received consumer request to http://%s%s", address, r.URL.Path)
 		c <- r
 	}))
 

@@ -55,7 +55,8 @@ type ConsumerPollResult struct {
 }
 
 type ConsumerOptions struct {
-	Group  string
-	Id     string
-	Topics []string
+	Group           string
+	Id              string
+	Topics          []string
+	MaxPollInterval time.Duration
 }

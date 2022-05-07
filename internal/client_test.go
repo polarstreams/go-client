@@ -98,7 +98,7 @@ var _ = Describe("Client", func() {
 			const pollInterval = 100 * time.Millisecond
 			client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress))
 			Expect(err).NotTo(HaveOccurred())
-			client.pollInterval = pollInterval
+			client.topologyPollInterval = pollInterval
 			Expect(client.Connect()).NotTo(HaveOccurred())
 			defer client.Close()
 			time.Sleep(pollInterval * 4)

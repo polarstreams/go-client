@@ -17,11 +17,13 @@ import (
 
 	"github.com/barcostreams/go-client/internal/serialization"
 	"github.com/barcostreams/go-client/internal/utils"
-	"github.com/barcostreams/go-client/types"
+	. "github.com/barcostreams/go-client/types"
+	"golang.org/x/net/context"
 	"golang.org/x/net/http2"
 )
 
-const defaultPollInterval = 10 * time.Second
+const topologyPollInterval = 10 * time.Second
+const defaultPollReqInterval = 5 * time.Second
 const baseReconnectionDelay = 100 * time.Millisecond
 const maxReconnectionDelay = 2 * time.Minute
 const maxOrdinal = 1 << 31
@@ -40,12 +42,13 @@ type Client struct {
 	topology               atomic.Value
 	isClosing              int64
 	isRegistering          int64
-	pollInterval           time.Duration
+	topologyPollInterval   time.Duration
 	producerIndex          uint32
+	consumerIndex          uint32
 	producersStatus        *utils.CopyOnWriteMap
 	consumerStatus         *utils.CopyOnWriteMap
-	logger                 types.Logger
-	consumerOptions        types.ConsumerOptions
+	logger                 Logger
+	consumerOptions        ConsumerOptions
 	fixedReconnectionDelay time.Duration // To simplify testing
 }
 
@@ -76,16 +79,12 @@ func NewClient(serviceUrl string) (*Client, error) {
 			},
 			Timeout: 2 * time.Second,
 		},
-		producerClient:         nil,
-		discoveryUrl:           discoveryUrl,
-		topology:               atomic.Value{},
-		pollInterval:           defaultPollInterval,
-		producersStatus:        utils.NewCopyOnWriteMap(),
-		consumerStatus:         utils.NewCopyOnWriteMap(),
-		isClosing:              0,
-		producerIndex:          0,
-		logger:                 types.NoopLogger,
-		fixedReconnectionDelay: 0,
+		discoveryUrl:         discoveryUrl,
+		topology:             atomic.Value{},
+		topologyPollInterval: topologyPollInterval,
+		producersStatus:      utils.NewCopyOnWriteMap(),
+		consumerStatus:       utils.NewCopyOnWriteMap(),
+		logger:               NoopLogger,
 	}
 
 	client.producerClient = &http.Client{
@@ -272,7 +271,7 @@ func (c *Client) Topology() *Topology {
 
 func (c *Client) pollTopology() {
 	for atomic.LoadInt64(&c.isClosing) == 0 {
-		time.Sleep(jitter(c.pollInterval))
+		time.Sleep(jitter(c.topologyPollInterval))
 		newTopology, err := c.queryTopology()
 		if err != nil {
 			// TODO: Use logging
@@ -305,7 +304,7 @@ func (c *Client) ProduceJson(topic string, message io.Reader, partitionKey strin
 	t := c.Topology()
 	ordinal := 0
 	if partitionKey == "" {
-		ordinal = c.getNextProducerOrdinal(t)
+		ordinal = c.getNextOrdinal(&c.producerIndex, t)
 	} else {
 		ordinal = c.getNaturalOwner(partitionKey, t)
 	}
@@ -325,7 +324,10 @@ func (c *Client) ProduceJson(topic string, message io.Reader, partitionKey strin
 	return nil, fmt.Errorf("No broker available: attempted %d brokers", maxAttempts)
 }
 
-func (c *Client) RegisterAsConsumer(options types.ConsumerOptions) {
+func (c *Client) RegisterAsConsumer(options ConsumerOptions) {
+	if options.MaxPollInterval == 0 {
+		options.MaxPollInterval = defaultPollReqInterval
+	}
 	c.consumerOptions = options
 	atomic.StoreInt64(&c.isRegistering, 1)
 	topology := c.Topology()
@@ -358,11 +360,71 @@ func (c *Client) SendStatusRequestToConsumer() {
 	wg.Wait()
 }
 
+func (c *Client) Poll() ConsumerPollResult {
+	// This is a trivial implementation, it can be more effective by parallelizing the requests
+	// And avoid hitting the brokers that don't yield data for long time
+	t := c.Topology()
+	start := time.Now()
+	maxPollInterval := c.consumerOptions.MaxPollInterval
+	ctxt, _ := context.WithDeadline(context.Background(), start.Add(maxPollInterval))
+	errors := make([]error, 0)
+	iterationDelay := 500 * time.Millisecond
+
+	for i := 0; time.Since(start) < maxPollInterval; i++ {
+		if i > 0 && i%t.Length == 0 {
+			if len(errors) == i {
+				// All hosts tried
+				return ConsumerPollResult{
+					Error: fmt.Errorf("All brokers polled resulted in error, first error: %s", errors[0]),
+				}
+			}
+		}
+
+		if i >= t.Length {
+			factor := 1
+			if i >= t.Length*2 {
+				factor = 2
+			}
+			time.Sleep(jitter(iterationDelay * time.Duration(factor)))
+		}
+
+		ordinal := c.getNextOrdinal(&c.consumerIndex, t)
+		url := fmt.Sprintf("http://%s:%d%s", t.hostName(ordinal), t.ConsumerPort, consumerPollUrl)
+		r, err := http.NewRequestWithContext(ctxt, "GET", url, nil)
+		utils.PanicIfErr(err)
+		resp, err := c.consumerClient.Do(r)
+		if err == nil {
+			if resp.StatusCode == http.StatusOK {
+				topicRecords, err := serialization.ReadOkResponse(resp)
+				if err != nil {
+					// There was a serialization issue
+					return ConsumerPollResult{Error: err}
+				}
+				if len(topicRecords) == 0 {
+					// Kind of an edge case or at least it only happens with mocked data
+					continue
+				}
+				return ConsumerPollResult{TopicRecords: topicRecords}
+			}
+
+			if resp.StatusCode == http.StatusNoContent {
+				resp.Body.Close()
+			} else {
+				errors = append(errors, serialization.ReadErrorResponse(resp))
+			}
+			continue
+		}
+		errors = append(errors, err)
+	}
+	return ConsumerPollResult{}
+}
+
 func (c *Client) Close() {
 	c.logger.Info("Barco client closing")
 	atomic.StoreInt64(&c.isClosing, 1)
 	c.discoveryClient.CloseIdleConnections()
 	c.producerClient.CloseIdleConnections()
+	c.consumerClient.CloseIdleConnections()
 }
 
 func bodyClose(r *http.Response) {
@@ -371,12 +433,12 @@ func bodyClose(r *http.Response) {
 	}
 }
 
-func (c *Client) getNextProducerOrdinal(t *Topology) int {
-	value := atomic.AddUint32(&c.producerIndex, 1)
+func (c *Client) getNextOrdinal(index *uint32, t *Topology) int {
+	value := atomic.AddUint32(index, 1)
 	if value >= maxOrdinal {
 		// Atomic inc operations don't wrap around.
 		// Not exactly fair when value >= maxOrdinal, but in practical terms is good enough
-		atomic.StoreUint32(&c.producerIndex, 0)
+		atomic.StoreUint32(index, 0)
 	}
 	return (int(value) - 1) % t.Length
 }
