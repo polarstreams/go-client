@@ -1,4 +1,4 @@
-package models
+package types
 
 import "log"
 
@@ -13,28 +13,25 @@ var StdLogger = &stdLogger{}
 var NoopLogger = &noopLogger{}
 
 type stdLogger struct {
-
 }
 
 func (l *stdLogger) Debug(format string, a ...interface{}) {
-	log.Printf("DEBUG " + format, a...)
+	log.Printf("DEBUG "+format, a...)
 }
 
 func (l *stdLogger) Info(format string, a ...interface{}) {
-	log.Printf("INFO " + format, a...)
+	log.Printf("INFO "+format, a...)
 }
 
 func (l *stdLogger) Warn(format string, a ...interface{}) {
-	log.Printf("WARN " + format, a...)
+	log.Printf("WARN "+format, a...)
 }
 
 func (l *stdLogger) Error(format string, a ...interface{}) {
-	log.Printf("ERROR " + format, a...)
+	log.Printf("ERROR "+format, a...)
 }
 
-
 type noopLogger struct {
-
 }
 
 func (l *noopLogger) Debug(format string, a ...interface{}) {

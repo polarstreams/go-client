@@ -1,22 +1,16 @@
 package internal
 
 import (
-	"fmt"
 	"math"
 	"sort"
+
+	. "github.com/barcostreams/go-client/types"
 )
 
-const StartToken Token = math.MinInt64
-
-// Represents a partition token
-type Token int64
+const startToken Token = math.MinInt64
 
 const maxRingSize = 12288 // 3*math.Pow(2, 12)
 const chunkSizeUnit = math.MaxUint64 / maxRingSize
-
-func (t Token) String() string {
-	return fmt.Sprintf("%d", t)
-}
 
 func PrimaryBroker(partitionKey string, brokersLength int) int {
 	token := HashToken(partitionKey)
@@ -40,7 +34,7 @@ func GetPrimaryTokenIndex(token Token, tokenRangeLength int) int {
 func GetTokenAtIndex(length int, index int) Token {
 	// Wrap around
 	index = index % length
-	return StartToken + Token(chunkSizeUnit*getRingFactor(length)*int64(index))
+	return startToken + Token(chunkSizeUnit*getRingFactor(length)*int64(index))
 }
 
 func getRingFactor(ringSize int) int64 {

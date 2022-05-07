@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -10,30 +11,41 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/barcostreams/go-client/internal/serialization"
 	"github.com/barcostreams/go-client/internal/utils"
-	"github.com/barcostreams/go-client/models"
+	"github.com/barcostreams/go-client/types"
 	"golang.org/x/net/http2"
 )
 
 const defaultPollInterval = 10 * time.Second
 const baseReconnectionDelay = 100 * time.Millisecond
 const maxReconnectionDelay = 2 * time.Minute
-const discoveryPath = "/v1/brokers"
 const maxOrdinal = 1 << 31
 
+const (
+	discoveryUrl        = "/v1/brokers"
+	consumerRegisterUrl = "/v1/consumer/register"
+	consumerPollUrl     = "/v1/consumer/poll"
+)
+
 type Client struct {
-	discoveryClient *http.Client
-	producerClient  *http.Client
-	discoveryUrl    string
-	topology        atomic.Value
-	isClosing       int64
-	pollInterval    time.Duration
-	producerIndex   uint32
-	producersStatus *utils.CopyOnWriteMap
-	logger          models.Logger
+	discoveryClient        *http.Client
+	producerClient         *http.Client
+	consumerClient         *http.Client
+	discoveryUrl           string
+	topology               atomic.Value
+	isClosing              int64
+	isRegistering          int64
+	pollInterval           time.Duration
+	producerIndex          uint32
+	producersStatus        *utils.CopyOnWriteMap
+	consumerStatus         *utils.CopyOnWriteMap
+	logger                 types.Logger
+	consumerOptions        types.ConsumerOptions
 	fixedReconnectionDelay time.Duration // To simplify testing
 }
 
@@ -48,14 +60,13 @@ func NewClient(serviceUrl string) (*Client, error) {
 		return nil, fmt.Errorf("Invalid scheme: %s, expected 'barco'", u.Scheme)
 	}
 
-	path := discoveryPath
+	path := discoveryUrl
 
 	if u.Path != "/" && u.Path != "" {
 		path = u.Path
 	}
 
 	discoveryUrl := fmt.Sprintf("http://%s%s", u.Host, path)
-	producersStatus := utils.NewCopyOnWriteMap()
 
 	client := &Client{
 		discoveryClient: &http.Client{
@@ -65,53 +76,74 @@ func NewClient(serviceUrl string) (*Client, error) {
 			},
 			Timeout: 2 * time.Second,
 		},
-		producerClient: nil,
-		discoveryUrl:  discoveryUrl,
-		topology:      atomic.Value{},
-		pollInterval:  defaultPollInterval,
-		producersStatus: producersStatus,
-		isClosing:     0,
-		producerIndex: 0,
-		logger: models.NoopLogger,
+		producerClient:         nil,
+		discoveryUrl:           discoveryUrl,
+		topology:               atomic.Value{},
+		pollInterval:           defaultPollInterval,
+		producersStatus:        utils.NewCopyOnWriteMap(),
+		consumerStatus:         utils.NewCopyOnWriteMap(),
+		isClosing:              0,
+		producerIndex:          0,
+		logger:                 types.NoopLogger,
 		fixedReconnectionDelay: 0,
 	}
 
-	producerClient := &http.Client{
+	client.producerClient = &http.Client{
 		Transport: &http2.Transport{
 			StrictMaxConcurrentStreams: true, // One connection per host
 			AllowHTTP:                  true,
 			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
 				// Pretend we are dialing a TLS endpoint.
-				client.logger.Info("Creating new connection to %s", addr)
-				conn, err := net.Dial(network, addr)
-				if err != nil {
-					client.logger.Warn("Connection to %s could not be established", addr)
-					client.startReconnecting(addr)
-					// There was an error when trying to create the first connection in the pool
-					return nil, err
-				}
-
-				// There's a possible race condition (a connection closing while a new request is being issued)
-				// This should resolve it
-				client.getProducerStatus(addr).SetAsUp()
-
-				c := utils.NewTrackedConnection(conn, func(c *utils.TrackedConnection) {
-					if atomic.LoadInt64(&client.isClosing) == 1 {
-						return
-					}
-					client.logger.Warn("Connection to %s closed", addr)
-					client.startReconnecting(addr)
-				})
-
-				return c, nil
+				return client.dial(network, addr, client.getProducerStatus(addr))
 			},
 			ReadIdleTimeout: 1000 * time.Millisecond,
 			PingTimeout:     1000 * time.Millisecond,
 		},
 	}
-	client.producerClient = producerClient
+
+	client.consumerClient = &http.Client{
+		Transport: &http2.Transport{
+			StrictMaxConcurrentStreams: true, // One connection per host
+			AllowHTTP:                  true,
+			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+				conn, err := client.dial(network, addr, client.getConsumerStatus(addr))
+				if err == nil && atomic.LoadInt64(&client.isRegistering) == 0 {
+					// Register consumer in the background, it might cause the first poll to be ignored but it's OK
+					go client.registerConsumerConn(addr)
+				}
+				return conn, err
+			},
+			ReadIdleTimeout: 1000 * time.Millisecond,
+			PingTimeout:     1000 * time.Millisecond,
+		},
+	}
 
 	return client, nil
+}
+
+func (c *Client) dial(network string, addr string, brokerStatus *BrokerStatusInfo) (*utils.TrackedConnection, error) {
+	c.logger.Info("Creating new connection to %s", addr)
+	conn, err := net.Dial(network, addr)
+	if err != nil {
+		c.logger.Warn("Connection to %s could not be established", addr)
+		c.startReconnection(addr, brokerStatus)
+		// There was an error when trying to create the first connection in the pool
+		return nil, err
+	}
+
+	// There's a possible race condition (a connection closing while a new request is being issued)
+	// This should resolve it
+	brokerStatus.SetAsUp()
+
+	tc := utils.NewTrackedConnection(conn, func(_ *utils.TrackedConnection) {
+		if atomic.LoadInt64(&c.isClosing) == 1 {
+			return
+		}
+		c.logger.Warn("Connection to %s closed", addr)
+		c.startReconnection(addr, brokerStatus)
+	})
+
+	return tc, nil
 }
 
 // Gets the topology the first time and starts the loop for polling for changes.
@@ -144,8 +176,46 @@ func (c *Client) getProducerStatus(key string) *BrokerStatusInfo {
 	return v.(*BrokerStatusInfo)
 }
 
-func (c *Client) startReconnecting(addr string) {
-	brokerStatus := c.getProducerStatus(addr)
+func (c *Client) isConsumerUp(ordinal int, t *Topology) bool {
+	return c.getConsumerStatusByOrdinal(ordinal, t).IsUp()
+}
+
+func (c *Client) getConsumerStatusByOrdinal(ordinal int, t *Topology) *BrokerStatusInfo {
+	key := fmt.Sprintf("%s:%d", t.hostName(ordinal), t.ConsumerPort)
+	return c.getConsumerStatus(key)
+}
+
+func (c *Client) getConsumerStatus(key string) *BrokerStatusInfo {
+	v, _, _ := c.consumerStatus.LoadOrStore(key, func() (interface{}, error) {
+		return NewBrokerStatusInfo(), nil
+	})
+	return v.(*BrokerStatusInfo)
+}
+
+func (c *Client) registerConsumerConn(addr string) {
+	url := fmt.Sprintf("http://%s%s", addr, consumerRegisterUrl)
+	jsonBody, err := json.Marshal(serialization.RegisterConsumerInfo{
+		Id:     c.consumerOptions.Id,
+		Group:  c.consumerOptions.Group,
+		Topics: c.consumerOptions.Topics,
+	})
+	utils.PanicIfErr(err)
+
+	resp, err := c.consumerClient.Post(url, contentType, bytes.NewReader(jsonBody))
+	if err != nil {
+		// It will retry automatically
+		c.logger.Warn("Error while trying to register as consumer: %s", err)
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		// This is worrisome: there's a HTTP/2 server but the request to register didn't succeeded
+		c.logger.Error("Unexpected status code from server: %d", resp.StatusCode)
+	}
+	defer resp.Body.Close()
+}
+
+func (c *Client) startReconnection(addr string, brokerStatus *BrokerStatusInfo) {
 	if atomic.LoadInt64(&c.isClosing) == 1 {
 		return
 	}
@@ -170,7 +240,7 @@ func (c *Client) startReconnecting(addr string) {
 			if c.fixedReconnectionDelay == 0 {
 				delay := maxReconnectionDelay
 				if i < 32 {
-					delay = time.Duration(1 << i)*baseReconnectionDelay
+					delay = time.Duration(1<<i) * baseReconnectionDelay
 					if delay > maxReconnectionDelay {
 						delay = maxReconnectionDelay
 					}
@@ -253,6 +323,39 @@ func (c *Client) ProduceJson(topic string, message io.Reader, partitionKey strin
 		}
 	}
 	return nil, fmt.Errorf("No broker available: attempted %d brokers", maxAttempts)
+}
+
+func (c *Client) RegisterAsConsumer(options types.ConsumerOptions) {
+	c.consumerOptions = options
+	atomic.StoreInt64(&c.isRegistering, 1)
+	topology := c.Topology()
+	var wg sync.WaitGroup
+	for i := 0; i < topology.Length; i++ {
+		wg.Add(1)
+		addr := fmt.Sprintf("%s:%d", topology.hostName(i), topology.ConsumerPort)
+		go func() {
+			defer wg.Done()
+			c.registerConsumerConn(addr)
+		}()
+	}
+
+	wg.Wait()
+	atomic.StoreInt64(&c.isRegistering, 0)
+}
+
+func (c *Client) SendStatusRequestToConsumer() {
+	topology := c.Topology()
+	var wg sync.WaitGroup
+	for i := 0; i < topology.Length; i++ {
+		wg.Add(1)
+		addr := fmt.Sprintf("%s:%d", topology.hostName(i), topology.ConsumerPort)
+		go func() {
+			defer wg.Done()
+			_, _ = c.consumerClient.Get(fmt.Sprintf("http://%s/status", addr))
+		}()
+	}
+
+	wg.Wait()
 }
 
 func (c *Client) Close() {

@@ -5,11 +5,11 @@ import "fmt"
 const contentType = "application/json"
 
 type Topology struct {
-	BaseName string `json:"baseName,omitempty"` // When defined, it represents the base name to build the broker names, e.g. "barco-"
-	Length  int `json:"length"` // The ring size
-	BrokerNames []string `json:"names,omitempty"`
-	ProducerPort int `json:"producerPort"`
-	ConsumerPort int `json:"consumerPort"`
+	BaseName     string   `json:"baseName,omitempty"` // When defined, it represents the base name to build the broker names, e.g. "barco-"
+	Length       int      `json:"length"`             // The ring size
+	BrokerNames  []string `json:"names,omitempty"`
+	ProducerPort int      `json:"producerPort"`
+	ConsumerPort int      `json:"consumerPort"`
 }
 
 func (t *Topology) ProducerUrl(topic string, ordinal int, partitionKey string) string {

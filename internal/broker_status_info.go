@@ -3,7 +3,7 @@ package internal
 import "sync/atomic"
 
 type BrokerStatusInfo struct {
-	isUpFlag int32
+	isUpFlag       int32
 	isReconnecting int32
 }
 

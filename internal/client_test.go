@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/barcostreams/go-client/models"
+	"github.com/barcostreams/go-client/types"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"golang.org/x/net/http2"
@@ -107,17 +107,12 @@ var _ = Describe("Client", func() {
 		})
 	})
 
-	Context("With a healthy cluster", func ()  {
+	Context("With a healthy cluster", func() {
 		Describe("ProduceJson()", func() {
 			var discoveryServer *httptest.Server
 			var s0, s1, s2 *http.Server
 			var c0, c1, c2 chan string
-			topology := Topology{
-				Length:       3,
-				BrokerNames:  []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"},
-				ProducerPort: 8091,
-				ConsumerPort: 8092,
-			}
+			topology := newTestTopology()
 			discoveryAddress := ""
 
 			BeforeEach(func() {
@@ -165,23 +160,10 @@ var _ = Describe("Client", func() {
 		})
 	})
 
-	Context("With hosts going up and down", func ()  {
+	Context("With hosts going up and down", func() {
 		Describe("ProduceJson()", func() {
 
-			// It("should send a request to each host in round robin", func() {
-			// 	client := newTestClient(discoveryAddress)
-			// 	defer client.Close()
-
-			// 	produceJson(client, `{"key0": "value0"}`, "")
-			// 	produceJson(client, `{"key1": "value1"}`, "")
-			// 	produceJson(client, `{"key2": "value2"}`, "")
-
-			// 	Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0"}`}))
-			// 	Expect(drainChan(c1)).To(Equal([]string{`{"key1": "value1"}`}))
-			// 	Expect(drainChan(c2)).To(Equal([]string{`{"key2": "value2"}`}))
-			// })
-
-			Context("With a partial online cluster", func ()  {
+			Context("With a partial online cluster", func() {
 				var discoveryServer *httptest.Server
 				var s0, s1, s2 *http.Server
 				var c0, c1, c2 chan string
@@ -269,7 +251,7 @@ var _ = Describe("Client", func() {
 	})
 })
 
-func NewProducerServer(address string, handler http.Handler) *http.Server {
+func NewTestServer(address string, handler http.Handler) *http.Server {
 	h2s := &http2.Server{}
 	server := &http.Server{
 		Addr:    address,
@@ -287,7 +269,7 @@ func NewProducerServer(address string, handler http.Handler) *http.Server {
 
 func NewProducerServerWithChannel(address string) (*http.Server, chan string) {
 	c := make(chan string, 100)
-	server := NewProducerServer(address, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := NewTestServer(address, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte("OK"))
 		if r.URL.Path == "/status" {
@@ -345,8 +327,17 @@ func drainChan(c chan string) []string {
 func newTestClient(discoveryAddress string) *Client {
 	client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress))
 	Expect(err).NotTo(HaveOccurred())
-	client.logger = models.StdLogger
+	client.logger = types.StdLogger
 	client.fixedReconnectionDelay = reconnectionDelay
 	Expect(client.Connect()).NotTo(HaveOccurred())
 	return client
+}
+
+func newTestTopology() Topology {
+	return Topology{
+		Length:       3,
+		BrokerNames:  []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"},
+		ProducerPort: 8091,
+		ConsumerPort: 8092,
+	}
 }
