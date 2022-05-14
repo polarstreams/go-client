@@ -36,3 +36,6 @@ jobs:
     - name: Unit tests
       run: go test -v -p=1 ./...
 
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
