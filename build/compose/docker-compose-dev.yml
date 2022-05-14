@@ -1,0 +1,21 @@
+version: "3.9"
+services:
+  client_test:
+    build:
+      context: ../../
+      dockerfile: ./build/container/Dockerfile.it
+    depends_on:
+      - barco
+  barco:
+    image: "jorgebay/barco:dev_temp"
+    environment:
+      - BARCO_DEV_MODE=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/status"]
+      interval: 1s
+      retries: 60
+      start_period: 2s
+      timeout: 1s
+
+# Use
+# docker-compose -f build/compose/docker-compose-dev.yml up --remove-orphans --build --abort-on-container-exit --exit-code-from client_test

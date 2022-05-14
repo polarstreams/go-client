@@ -1,0 +1,9 @@
+FROM golang:1.18-buster
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+CMD ["go", "test", "-v", "-tags=integration", "-p=1", "./internal/test/integration"]

@@ -1,0 +1,7 @@
+{
+    "go.buildTags": "integration,profiling",
+    "cSpell.words": [
+        "gomega",
+        "onsi"
+    ]
+}

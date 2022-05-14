@@ -96,9 +96,9 @@ var _ = Describe("Client", func() {
 		topology := newTestTopology()
 		discoveryAddress := ""
 		consumerOptions := ConsumerOptions{
-			Group:  "g1",
-			Id:     "id1",
-			Topics: []string{"t1"},
+			Group:           "g1",
+			Id:              "id1",
+			Topics:          []string{"t1"},
 			MaxPollInterval: 3 * time.Second,
 		}
 
@@ -134,7 +134,7 @@ var _ = Describe("Client", func() {
 			Expect(len(drainRChan(c1))).To(BeNumerically(">=", 1))
 			Expect(len(drainRChan(c2))).To(BeNumerically(">=", 1))
 
-			Expect(time.Since(start)).To(BeNumerically(">=", consumerOptions.MaxPollInterval - 20*time.Millisecond))
+			Expect(time.Since(start)).To(BeNumerically(">=", consumerOptions.MaxPollInterval-20*time.Millisecond))
 		})
 
 		XIt("should query brokers until there's a successful response")

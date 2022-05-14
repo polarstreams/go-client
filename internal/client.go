@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,7 +39,8 @@ type Client struct {
 	discoveryClient        *http.Client
 	producerClient         *http.Client
 	consumerClient         *http.Client
-	discoveryUrl           string
+	discoveryUrl           string // The full discovery url, like http://host:port/path
+	discoveryHost          string // The host and port
 	topology               atomic.Value
 	isClosing              int64
 	isRegistering          int64
@@ -70,6 +72,7 @@ func NewClient(serviceUrl string) (*Client, error) {
 	}
 
 	discoveryUrl := fmt.Sprintf("http://%s%s", u.Host, path)
+	discoveryHost := u.Host
 
 	client := &Client{
 		discoveryClient: &http.Client{
@@ -80,6 +83,7 @@ func NewClient(serviceUrl string) (*Client, error) {
 			Timeout: 2 * time.Second,
 		},
 		discoveryUrl:         discoveryUrl,
+		discoveryHost:        discoveryHost,
 		topology:             atomic.Value{},
 		topologyPollInterval: topologyPollInterval,
 		producersStatus:      utils.NewCopyOnWriteMap(),
@@ -297,7 +301,28 @@ func (c *Client) queryTopology() (*Topology, error) {
 		return nil, err
 	}
 
+	if value.Length == 1 && len(value.BrokerNames) == 1 {
+		// Use the discovery host for dev mode
+		value = c.useDiscoveryHostForBroker(&value)
+	}
+
 	return &value, nil
+}
+
+func (c *Client) useDiscoveryHostForBroker(t *Topology) Topology {
+	name := c.discoveryHost
+	index := strings.LastIndex(name, ":")
+
+	if index > 0 {
+		name = name[:index]
+	}
+
+	return Topology{
+		Length:       1,
+		BrokerNames:  []string{name},
+		ProducerPort: t.ProducerPort,
+		ConsumerPort: t.ConsumerPort,
+	}
 }
 
 func (c *Client) ProduceJson(topic string, message io.Reader, partitionKey string) (*http.Response, error) {
