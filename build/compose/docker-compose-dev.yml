@@ -7,7 +7,7 @@ services:
     depends_on:
       - barco
   barco:
-    image: "jorgebay/barco:dev_temp"
+    image: "jorgebay/barco:dev1"
     environment:
       - BARCO_DEV_MODE=true
     healthcheck:
@@ -18,4 +18,4 @@ services:
       timeout: 1s
 
 # Use
-# docker-compose -f build/compose/docker-compose-dev.yml up --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+# docker-compose -f build/compose/docker-compose-dev.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test

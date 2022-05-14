@@ -13,6 +13,13 @@ import (
 type Consumer interface {
 	Poll() ConsumerPollResult
 
+	// Gets a point-in-time value of the number of brokers in the cluster
+	BrokersLength() int
+
+	// Closes the consumer
+	//
+	// A Consumer instance is designed to be long-lived. Close() should only be called when no more messages
+	// should be read in the application.
 	Close()
 }
 
@@ -55,6 +62,10 @@ type consumer struct {
 
 func (c *consumer) Poll() ConsumerPollResult {
 	return c.client.Poll()
+}
+
+func (p *consumer) BrokersLength() int {
+	return p.client.Topology().Length
 }
 
 func (c *consumer) Close() {

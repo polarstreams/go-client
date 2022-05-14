@@ -14,6 +14,9 @@ type Producer interface {
 	// Sends a message to a topic
 	Send(topic string, message io.Reader, partitionKey string) error
 
+	// Gets a point-in-time value of the number of brokers in the cluster
+	BrokersLength() int
+
 	// Closes the producer
 	//
 	// A Producer instance is designed to be long-lived. Close() should only be called when no more messages are
@@ -57,6 +60,10 @@ func (p *producer) Send(topic string, message io.Reader, partitionKey string) er
 		return err
 	}
 	return fmt.Errorf(body)
+}
+
+func (p *producer) BrokersLength() int {
+	return p.client.Topology().Length
 }
 
 func (p *producer) Close() {
