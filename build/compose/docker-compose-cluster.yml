@@ -16,7 +16,7 @@ services:
       - BARCO_BROKER_NAMES=barco_0,barco_1,barco_2
       - BARCO_ORDINAL=0
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8083/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:9250/status"]
       interval: 1s
       start_period: 10s
   barco_1:

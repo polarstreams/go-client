@@ -11,7 +11,7 @@ services:
     environment:
       - BARCO_DEV_MODE=true
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8083/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:9250/status"]
       interval: 1s
       retries: 60
       start_period: 2s
