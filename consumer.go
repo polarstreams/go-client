@@ -27,15 +27,9 @@ type Consumer interface {
 
 // NewConsumer creates a new Consumer, discovers the barco cluster and subscribes to the topic provided.
 func NewConsumer(serviceUrl string, consumerGroup string, topic string) (Consumer, error) {
-	hostName, err := os.Hostname()
-	if err != nil {
-		return nil, fmt.Errorf("Host name could not be retrieved to build the consumer id: %s", err)
-	}
-
-	id := fmt.Sprintf("%s_%s", hostName, uuid.New())
 	options := ConsumerOptions{
 		Group:  consumerGroup,
-		Id:     id,
+		Id:     "",
 		Topics: []string{topic},
 	}
 

@@ -50,6 +50,7 @@ type Client struct {
 	consumerIndex          uint32
 	producersStatus        *utils.CopyOnWriteMap
 	consumerStatus         *utils.CopyOnWriteMap
+	lastConsumerError      int64
 	logger                 Logger
 	consumerOptions        ConsumerOptions
 	fixedReconnectionDelay time.Duration // To simplify testing
@@ -413,6 +414,12 @@ func (c *Client) Poll() ConsumerPollResult {
 	brokersLength := t.Length
 
 	for attempt := 0; time.Since(start) < maxPollInterval; attempt++ {
+		if time.Since(time.UnixMilli(atomic.LoadInt64(&c.lastConsumerError))) < iterationDelay {
+			// Add a delay to prevent cycling through errors and consuming CPU
+			c.logger.Info("Delaying next attempt after a consumer error")
+			time.Sleep(jitter(iterationDelay))
+		}
+
 		responseChan := make(chan ConsumerPollResult, brokersLength)
 		for i := 0; i < brokersLength; i++ {
 			ordinal := i
@@ -442,6 +449,8 @@ func (c *Client) Poll() ConsumerPollResult {
 		}
 
 		if len(errors) == brokersLength {
+			atomic.StoreInt64(&c.lastConsumerError, time.Now().UnixMilli())
+
 			return ConsumerPollResult{
 				Error: fmt.Errorf("All brokers polled resulted in error, first error: %s", errors[0]),
 			}
