@@ -8,4 +8,4 @@ kc apply -f build/k8s/test.yml
 kc cp . test-client:/go/src
 
 # Run integration tests
-kc exec test-client -- bash -c "cd src/src && go test -v -count=1 -tags=integration ./internal/test/integration/"
+kc exec test-client -- bash -c "cd src/src && TEST_DISCOVERY_HOST=barco.barco go test -v -count=1 -tags=integration ./internal/test/integration/"

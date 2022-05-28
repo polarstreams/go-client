@@ -7,6 +7,7 @@ import (
 
 	. "github.com/barcostreams/go-client/internal"
 	"github.com/barcostreams/go-client/internal/utils"
+	"github.com/barcostreams/go-client/types"
 )
 
 // Represents a Barco client that publishes records in a cluster.
@@ -24,11 +25,31 @@ type Producer interface {
 	Close()
 }
 
+// Represents the additional options to set when creating a Producer.
+type ProducerOptions struct {
+	Logger types.Logger
+}
+
 // NewProducer creates a new Producer and discovers the barco cluster.
 //
 // A Producer instance is designed to be long-lived and it should be reused across the application.
 func NewProducer(serviceUrl string) (Producer, error) {
-	client, err := NewClient(serviceUrl)
+	return NewProducerWithOpts(serviceUrl, ProducerOptions{
+		Logger: types.NoopLogger,
+	})
+}
+
+func (o *ProducerOptions) toClientOptions() *ClientOptions {
+	return &ClientOptions{
+		Logger: o.Logger,
+	}
+}
+
+// NewProducer creates a new Producer with the provided options and discovers the barco cluster.
+//
+// A Producer instance is designed to be long-lived and it should be reused across the application.
+func NewProducerWithOpts(serviceUrl string, options ProducerOptions) (Producer, error) {
+	client, err := NewClient(serviceUrl, options.toClientOptions())
 	if err != nil {
 		return nil, err
 	}

@@ -23,11 +23,12 @@ import (
 	"golang.org/x/net/http2"
 )
 
-const topologyPollInterval = 10 * time.Second
+const DefaultTopologyPollInterval = 10 * time.Second
 const defaultPollReqInterval = 5 * time.Second
 const baseReconnectionDelay = 100 * time.Millisecond
 const maxReconnectionDelay = 2 * time.Minute
 const maxOrdinal = 1 << 31
+const defaultDiscoveryPort = 9250
 
 const (
 	discoveryUrl        = "/v1/brokers"
@@ -54,9 +55,15 @@ type Client struct {
 	fixedReconnectionDelay time.Duration // To simplify testing
 }
 
+type ClientOptions struct {
+	Logger                 Logger
+	TopologyPollInterval   time.Duration
+	FixedReconnectionDelay time.Duration
+}
+
 var jitterRng = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-func NewClient(serviceUrl string) (*Client, error) {
+func NewClient(serviceUrl string, options *ClientOptions) (*Client, error) {
 	u, err := url.Parse(serviceUrl)
 	if err != nil {
 		return nil, err
@@ -64,6 +71,10 @@ func NewClient(serviceUrl string) (*Client, error) {
 	if u.Scheme != "barco" {
 		return nil, fmt.Errorf("Invalid scheme: %s, expected 'barco'", u.Scheme)
 	}
+	if options == nil {
+		options = &ClientOptions{}
+	}
+	setDefaultOptions(options)
 
 	path := discoveryUrl
 
@@ -71,8 +82,13 @@ func NewClient(serviceUrl string) (*Client, error) {
 		path = u.Path
 	}
 
-	discoveryUrl := fmt.Sprintf("http://%s%s", u.Host, path)
-	discoveryHost := u.Host
+	host := u.Host
+	if !strings.Contains(host, ":") {
+		host = fmt.Sprintf("%s:%d", host, defaultDiscoveryPort)
+	}
+
+	discoveryUrl := fmt.Sprintf("http://%s%s", host, path)
+	discoveryHost := host
 
 	client := &Client{
 		discoveryClient: &http.Client{
@@ -82,13 +98,14 @@ func NewClient(serviceUrl string) (*Client, error) {
 			},
 			Timeout: 2 * time.Second,
 		},
-		discoveryUrl:         discoveryUrl,
-		discoveryHost:        discoveryHost,
-		topology:             atomic.Value{},
-		topologyPollInterval: topologyPollInterval,
-		producersStatus:      utils.NewCopyOnWriteMap(),
-		consumerStatus:       utils.NewCopyOnWriteMap(),
-		logger:               NoopLogger,
+		discoveryUrl:           discoveryUrl,
+		discoveryHost:          discoveryHost,
+		topology:               atomic.Value{},
+		topologyPollInterval:   options.TopologyPollInterval,
+		producersStatus:        utils.NewCopyOnWriteMap(),
+		consumerStatus:         utils.NewCopyOnWriteMap(),
+		logger:                 options.Logger,
+		fixedReconnectionDelay: options.FixedReconnectionDelay,
 	}
 
 	client.producerClient = &http.Client{
@@ -482,4 +499,13 @@ func jitter(t time.Duration) time.Duration {
 	jitterRange := jitterRng.Float64() * maxJitter
 	startJitter := 0.05 * ms
 	return time.Duration(ms-startJitter+jitterRange) * time.Millisecond
+}
+
+func setDefaultOptions(options *ClientOptions) {
+	if options.Logger == nil {
+		options.Logger = NoopLogger
+	}
+	if options.TopologyPollInterval == 0 {
+		options.TopologyPollInterval = DefaultTopologyPollInterval
+	}
 }

@@ -39,15 +39,15 @@ var _ = Describe("Client", func() {
 	// for i in {2..3}; do sudo ifconfig lo0 alias 127.0.0.$i up; done
 	Describe("NewClient()", func() {
 		It("should parse the url and set the http client", func() {
-			client, err := NewClient("barco://my-host:1234/")
+			client, err := NewClient("barco://my-host:1234/", nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(client.discoveryUrl).To(Equal("http://my-host:1234/v1/brokers"))
 		})
 
 		It("should return an error when service url is invalid", func() {
-			_, err := NewClient("zzz://my-host:1234/")
+			_, err := NewClient("zzz://my-host:1234/", nil)
 			Expect(err).To(HaveOccurred())
-			_, err = NewClient("abc")
+			_, err = NewClient("abc", nil)
 			Expect(err).To(HaveOccurred())
 		})
 	})
@@ -82,7 +82,7 @@ var _ = Describe("Client", func() {
 		})
 
 		It("should retrieve and store the topology", func() {
-			client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress))
+			client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress), nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(client.Connect()).NotTo(HaveOccurred())
 			defer client.Close()
@@ -96,7 +96,7 @@ var _ = Describe("Client", func() {
 
 		It("should start polling in the background", func() {
 			const pollInterval = 100 * time.Millisecond
-			client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress))
+			client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress), nil)
 			Expect(err).NotTo(HaveOccurred())
 			client.topologyPollInterval = pollInterval
 			Expect(client.Connect()).NotTo(HaveOccurred())
@@ -325,10 +325,12 @@ func drainChan(c chan string) []string {
 
 // Returns a connected client
 func newTestClient(discoveryAddress string) *Client {
-	client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress))
+	options := ClientOptions{
+		Logger:                 types.StdLogger,
+		FixedReconnectionDelay: reconnectionDelay,
+	}
+	client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress), &options)
 	Expect(err).NotTo(HaveOccurred())
-	client.logger = types.StdLogger
-	client.fixedReconnectionDelay = reconnectionDelay
 	Expect(client.Connect()).NotTo(HaveOccurred())
 	return client
 }

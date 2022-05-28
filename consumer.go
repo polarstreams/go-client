@@ -30,7 +30,7 @@ func NewConsumer(serviceUrl string, consumerGroup string, topic string) (Consume
 		return nil, fmt.Errorf("Host name could not be retrieved to build the consumer id: %s", err)
 	}
 
-	client, err := NewClient(serviceUrl)
+	client, err := NewClient(serviceUrl, nil)
 	if err != nil {
 		return nil, err
 	}

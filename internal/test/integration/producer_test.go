@@ -10,7 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/barcostreams/go-client"
+	. "github.com/barcostreams/go-client"
+	"github.com/barcostreams/go-client/types"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -30,20 +31,37 @@ func Test(t *testing.T) {
 }
 
 var _ = Describe("Producer", func ()  {
-	It("should work", func ()  {
-		host := env("TEST_DISCOVERY_HOST", "barco")
-		producer, err := barco.NewProducer(fmt.Sprintf("barco://%s:%d", host, discoveryPort))
-		Expect(err).NotTo(HaveOccurred())
-		err = producer.Send("abc", strings.NewReader(`{"hello": 1}`), partitionKeyT0Range)
-		Expect(err).NotTo(HaveOccurred())
+	expectedBrokers, _ := strconv.Atoi(env("TEST_EXPECTED_BROKERS", "1"))
+	if isK8s() {
+		expectedBrokers = 3
+	}
 
-		expectedLength, _ := strconv.Atoi(env("TEST_EXPECTED_BROKERS", "1"))
-		if isK8s() {
-			expectedLength = 3
-		}
-		Expect(producer.BrokersLength()).To(Equal(expectedLength))
+	It("should discover the cluster with port and send data", func ()  {
+		host := env("TEST_DISCOVERY_HOST", "barco")
+		producer := newTestProducer(fmt.Sprintf("barco://%s:%d", host, discoveryPort))
+		defer producer.Close()
+		err := producer.Send("abc", strings.NewReader(`{"hello": 1}`), partitionKeyT0Range)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(producer.BrokersLength()).To(Equal(expectedBrokers))
+	})
+
+	It("should discover the cluster without port and send data", func ()  {
+		host := env("TEST_DISCOVERY_HOST", "barco")
+		producer := newTestProducer(fmt.Sprintf("barco://%s", host))
+		defer producer.Close()
+		err := producer.Send("abc", strings.NewReader(`{"hello": 2}`), partitionKeyT0Range)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(producer.BrokersLength()).To(Equal(expectedBrokers))
 	})
 })
+
+func newTestProducer(serviceUrl string) Producer {
+	producer, err := NewProducerWithOpts(serviceUrl, ProducerOptions{
+		Logger: types.StdLogger,
+	})
+	Expect(err).NotTo(HaveOccurred())
+	return producer
+}
 
 func env(key string, defaultValue string) string {
 	value := os.Getenv(key)
