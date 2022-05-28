@@ -54,9 +54,16 @@ type ConsumerPollResult struct {
 	Error        error
 }
 
+// Represents the options for creating a Consumer.
 type ConsumerOptions struct {
 	Group           string
-	Id              string
+	Id              string // A unique identifier for the consumer. When not set a random identifier will be generated.
 	Topics          []string
 	MaxPollInterval time.Duration
+	Logger          Logger
+}
+
+// Represents the additional options to set when creating a Producer.
+type ProducerOptions struct {
+	Logger Logger
 }

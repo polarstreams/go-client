@@ -409,56 +409,85 @@ func (c *Client) Poll() ConsumerPollResult {
 	start := time.Now()
 	maxPollInterval := c.consumerOptions.MaxPollInterval
 	ctxt, _ := context.WithDeadline(context.Background(), start.Add(maxPollInterval))
-	errors := make([]error, 0)
 	iterationDelay := 500 * time.Millisecond
+	brokersLength := t.Length
 
-	for i := 0; time.Since(start) < maxPollInterval; i++ {
-		if i > 0 && i%t.Length == 0 {
-			if len(errors) == i {
-				// All hosts tried
-				return ConsumerPollResult{
-					Error: fmt.Errorf("All brokers polled resulted in error, first error: %s", errors[0]),
-				}
+	for attempt := 0; time.Since(start) < maxPollInterval; attempt++ {
+		responseChan := make(chan ConsumerPollResult, brokersLength)
+		for i := 0; i < brokersLength; i++ {
+			ordinal := i
+			go func() {
+				responseChan <- c.pollBroker(ordinal, ctxt, t)
+			}()
+		}
+
+		errors := make([]error, 0)
+		topicRecords := make([]TopicRecords, 0)
+		for i := 0; i < brokersLength; i++ {
+			r := <-responseChan
+			if r.Error != nil {
+				errors = append(errors, r.Error)
+				// TODO: Set the Broker ordinal for the log message
+				c.logger.Warn("Error occurred when polling broker: %s", r.Error)
+				continue
+			}
+
+			if len(r.TopicRecords) > 0 {
+				topicRecords = append(topicRecords, r.TopicRecords...)
 			}
 		}
 
-		if i >= t.Length {
-			factor := 1
-			if i >= t.Length*2 {
-				factor = 2
-			}
-			time.Sleep(jitter(iterationDelay * time.Duration(factor)))
+		if len(topicRecords) > 0 {
+			return ConsumerPollResult{TopicRecords: topicRecords}
 		}
 
-		ordinal := c.getNextOrdinal(&c.consumerIndex, t)
-		url := fmt.Sprintf("http://%s:%d%s", t.hostName(ordinal), t.ConsumerPort, consumerPollUrl)
-		r, err := http.NewRequestWithContext(ctxt, "GET", url, nil)
-		utils.PanicIfErr(err)
-		resp, err := c.consumerClient.Do(r)
-		if err == nil {
-			if resp.StatusCode == http.StatusOK {
-				topicRecords, err := serialization.ReadOkResponse(resp)
-				if err != nil {
-					// There was a serialization issue
-					return ConsumerPollResult{Error: err}
-				}
-				if len(topicRecords) == 0 {
-					// Kind of an edge case or at least it only happens with mocked data
-					continue
-				}
-				return ConsumerPollResult{TopicRecords: topicRecords}
+		if len(errors) == brokersLength {
+			return ConsumerPollResult{
+				Error: fmt.Errorf("All brokers polled resulted in error, first error: %s", errors[0]),
 			}
-
-			if resp.StatusCode == http.StatusNoContent {
-				resp.Body.Close()
-			} else {
-				errors = append(errors, serialization.ReadErrorResponse(resp))
-			}
-			continue
 		}
-		errors = append(errors, err)
+
+		// Wait for next attempt
+		factor := 1
+		if attempt > 2 {
+			factor = 2
+		}
+		time.Sleep(jitter(iterationDelay * time.Duration(factor)))
 	}
+
 	return ConsumerPollResult{}
+}
+
+func (c *Client) pollBroker(ordinal int, ctxt context.Context, t *Topology) ConsumerPollResult {
+	url := fmt.Sprintf("http://%s:%d%s", t.hostName(ordinal), t.ConsumerPort, consumerPollUrl)
+	r, err := http.NewRequestWithContext(ctxt, "POST", url, nil)
+	utils.PanicIfErr(err)
+	resp, err := c.consumerClient.Do(r)
+	if err != nil {
+		if err == context.DeadlineExceeded || err == context.Canceled {
+			return ConsumerPollResult{}
+		}
+		return ConsumerPollResult{Error: err}
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		topicRecords, err := serialization.ReadOkResponse(resp)
+		if err != nil {
+			// There was a serialization issue
+			return ConsumerPollResult{Error: err}
+		}
+		if len(topicRecords) == 0 {
+			// Kind of an edge case or at least it only happens with mocked data
+			return ConsumerPollResult{}
+		}
+		return ConsumerPollResult{TopicRecords: topicRecords}
+	}
+
+	if resp.StatusCode == http.StatusNoContent {
+		// TODO: Get Retry-After
+		return ConsumerPollResult{}
+	}
+	return ConsumerPollResult{Error: serialization.ReadErrorResponse(resp)}
 }
 
 func (c *Client) Close() {

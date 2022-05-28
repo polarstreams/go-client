@@ -25,21 +25,16 @@ type Producer interface {
 	Close()
 }
 
-// Represents the additional options to set when creating a Producer.
-type ProducerOptions struct {
-	Logger types.Logger
-}
-
 // NewProducer creates a new Producer and discovers the barco cluster.
 //
 // A Producer instance is designed to be long-lived and it should be reused across the application.
 func NewProducer(serviceUrl string) (Producer, error) {
-	return NewProducerWithOpts(serviceUrl, ProducerOptions{
+	return NewProducerWithOpts(serviceUrl, types.ProducerOptions{
 		Logger: types.NoopLogger,
 	})
 }
 
-func (o *ProducerOptions) toClientOptions() *ClientOptions {
+func fromProducerOptions(o *types.ProducerOptions) *ClientOptions {
 	return &ClientOptions{
 		Logger: o.Logger,
 	}
@@ -48,8 +43,8 @@ func (o *ProducerOptions) toClientOptions() *ClientOptions {
 // NewProducer creates a new Producer with the provided options and discovers the barco cluster.
 //
 // A Producer instance is designed to be long-lived and it should be reused across the application.
-func NewProducerWithOpts(serviceUrl string, options ProducerOptions) (Producer, error) {
-	client, err := NewClient(serviceUrl, options.toClientOptions())
+func NewProducerWithOpts(serviceUrl string, options types.ProducerOptions) (Producer, error) {
+	client, err := NewClient(serviceUrl, fromProducerOptions(&options))
 	if err != nil {
 		return nil, err
 	}

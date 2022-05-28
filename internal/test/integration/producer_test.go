@@ -36,27 +36,28 @@ var _ = Describe("Producer", func ()  {
 		expectedBrokers = 3
 	}
 
+	const topic = "producer-test"
+	host := env("TEST_DISCOVERY_HOST", "barco")
+
 	It("should discover the cluster with port and send data", func ()  {
-		host := env("TEST_DISCOVERY_HOST", "barco")
 		producer := newTestProducer(fmt.Sprintf("barco://%s:%d", host, discoveryPort))
 		defer producer.Close()
-		err := producer.Send("abc", strings.NewReader(`{"hello": 1}`), partitionKeyT0Range)
+		err := producer.Send(topic, strings.NewReader(`{"hello": 1}`), partitionKeyT0Range)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(producer.BrokersLength()).To(Equal(expectedBrokers))
 	})
 
 	It("should discover the cluster without port and send data", func ()  {
-		host := env("TEST_DISCOVERY_HOST", "barco")
 		producer := newTestProducer(fmt.Sprintf("barco://%s", host))
 		defer producer.Close()
-		err := producer.Send("abc", strings.NewReader(`{"hello": 2}`), partitionKeyT0Range)
+		err := producer.Send(topic, strings.NewReader(`{"hello": 2}`), partitionKeyT0Range)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(producer.BrokersLength()).To(Equal(expectedBrokers))
 	})
 })
 
 func newTestProducer(serviceUrl string) Producer {
-	producer, err := NewProducerWithOpts(serviceUrl, ProducerOptions{
+	producer, err := NewProducerWithOpts(serviceUrl, types.ProducerOptions{
 		Logger: types.StdLogger,
 	})
 	Expect(err).NotTo(HaveOccurred())
