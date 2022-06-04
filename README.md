@@ -8,7 +8,7 @@ Go Client for Barco Streams. Barco is a lightweight, elastic, kubernetes-native 
 go get github.com/barcostreams/go-client
 ```
 
-![go build](https://github.com/barcostreams/barco/actions/workflows/go.yml/badge.svg)
+![go build](https://github.com/barcostreams/go-client/actions/workflows/go.yml/badge.svg)
 
 ## Getting started
 

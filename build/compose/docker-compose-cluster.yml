@@ -10,7 +10,7 @@ services:
     depends_on:
       - barco_0
   barco_0:
-    image: "jorgebay/barco:dev1"
+    image: "barcostreams/barco:dev1"
     env_file: "../env/test.env"
     environment:
       - BARCO_BROKER_NAMES=barco_0,barco_1,barco_2
@@ -20,13 +20,13 @@ services:
       interval: 1s
       start_period: 10s
   barco_1:
-    image: "jorgebay/barco:dev1"
+    image: "barcostreams/barco:dev1"
     env_file: "../env/test.env"
     environment:
       - BARCO_BROKER_NAMES=barco_0,barco_1,barco_2
       - BARCO_ORDINAL=1
   barco_2:
-    image: "jorgebay/barco:dev1"
+    image: "barcostreams/barco:dev1"
     env_file: "../env/test.env"
     environment:
       - BARCO_BROKER_NAMES=barco_0,barco_1,barco_2
