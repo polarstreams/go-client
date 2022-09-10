@@ -162,12 +162,19 @@ func NewConsumerServerWithChannel(address string) (*http.Server, chan *http.Requ
 func drainRChan(c chan *http.Request) []*http.Request {
 	result := make([]*http.Request, 0)
 	hasData := true
+	counter := 0
 	for hasData {
 		select {
 		case m := <-c:
 			result = append(result, m)
 		default:
-			hasData = false
+			if counter < 2 {
+				// Give it some time to receive
+				time.Sleep(20 * time.Millisecond)
+			} else {
+				hasData = false
+			}
+			counter++
 		}
 	}
 	return result

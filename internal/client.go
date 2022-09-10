@@ -352,14 +352,34 @@ func (c *Client) ProduceJson(topic string, message io.Reader, partitionKey strin
 		ordinal = c.getNaturalOwner(partitionKey, t)
 	}
 
+	bufferedMessage := utils.ToReadSeeker(message)
+	initialPosition, err := bufferedMessage.Seek(0, io.SeekCurrent)
+	if err != nil {
+		// Seeking current position should be a safe operation, in any case, error out
+		return nil, err
+	}
+
 	maxAttempts := int(math.Min(float64(t.Length), 4))
 	for i := 0; i < maxAttempts; i++ {
+		if i > 0 {
+			// Rewind the reader
+			_, err := bufferedMessage.Seek(initialPosition, io.SeekStart)
+			if err != nil {
+				return nil, err
+			}
+		}
 		brokerOrdinal := (ordinal + i) % t.Length
 		if !c.isProducerUp(brokerOrdinal, t) {
 			c.logger.Debug("B%d is down, moving to next host", brokerOrdinal)
 		}
+
 		url := t.ProducerUrl(topic, brokerOrdinal, partitionKey)
-		resp, err := c.producerClient.Post(url, contentType, message)
+		req, err := http.NewRequest(http.MethodPost, url, bufferedMessage)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", contentType)
+		resp, err := c.producerClient.Do(req)
 		if err == nil {
 			return resp, nil
 		}

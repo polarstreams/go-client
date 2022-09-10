@@ -276,7 +276,8 @@ func NewProducerServerWithChannel(address string) (*http.Server, chan string) {
 			log.Printf("Broker with address %s received status request", address)
 			return
 		}
-		c <- reqBody(r)
+		body := reqBody(r)
+		c <- body
 	}))
 
 	return server, c

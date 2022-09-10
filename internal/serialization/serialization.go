@@ -25,12 +25,12 @@ func unmarshalTopicRecords(r io.Reader) (*TopicRecords, error) {
 	payloadLength := int32(0)
 	binary.Read(r, endianness, &payloadLength)
 	payload := make([]byte, payloadLength)
-	n, err := r.Read(payload)
-	if err != nil {
+
+	if _, err = io.ReadFull(r, payload); err != nil {
 		return nil, err
 	}
 
-	payloadReader, err := zstd.NewReader(bytes.NewReader(payload[:n]))
+	payloadReader, err := zstd.NewReader(bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
