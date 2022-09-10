@@ -2,6 +2,7 @@ package types
 
 import "log"
 
+// The logger to be used by the client to output log messages
 type Logger interface {
 	Debug(format string, a ...interface{})
 	Info(format string, a ...interface{})
@@ -9,7 +10,10 @@ type Logger interface {
 	Error(format string, a ...interface{})
 }
 
+// A logger using golang's builtin log.Printf() method, prefixed with the level
 var StdLogger = &stdLogger{}
+
+// A logger that does not output information
 var NoopLogger = &noopLogger{}
 
 type stdLogger struct {

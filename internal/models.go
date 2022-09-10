@@ -27,3 +27,23 @@ func (t *Topology) hostName(ordinal int) string {
 
 	return fmt.Sprintf("%s%d", t.BaseName, ordinal)
 }
+
+type defaultBrokerError struct {
+	err           error
+	brokerOrdinal int
+}
+
+func (e *defaultBrokerError) Error() string {
+	return e.err.Error()
+}
+
+func (e *defaultBrokerError) BrokerOrdinal() int {
+	return e.brokerOrdinal
+}
+
+func newBrokerError(err error, ordinal int) *defaultBrokerError {
+	return &defaultBrokerError{
+		err:           err,
+		brokerOrdinal: ordinal,
+	}
+}

@@ -31,9 +31,10 @@ const maxOrdinal = 1 << 31
 const defaultDiscoveryPort = 9250
 
 const (
-	discoveryUrl        = "/v1/brokers"
-	consumerRegisterUrl = "/v1/consumer/register"
-	consumerPollUrl     = "/v1/consumer/poll"
+	discoveryUrl            = "/v1/brokers"
+	consumerRegisterUrl     = "/v1/consumer/register"
+	consumerPollUrl         = "/v1/consumer/poll"
+	consumerManualCommitUrl = "/v1/consumer/commit"
 )
 
 type Client struct {
@@ -489,7 +490,7 @@ func (c *Client) Poll() ConsumerPollResult {
 
 func (c *Client) pollBroker(ordinal int, ctxt context.Context, t *Topology) ConsumerPollResult {
 	url := fmt.Sprintf("http://%s:%d%s", t.hostName(ordinal), t.ConsumerPort, consumerPollUrl)
-	r, err := http.NewRequestWithContext(ctxt, "POST", url, nil)
+	r, err := http.NewRequestWithContext(ctxt, http.MethodPost, url, nil)
 	utils.PanicIfErr(err)
 	resp, err := c.consumerClient.Do(r)
 	if err != nil {
@@ -517,6 +518,53 @@ func (c *Client) pollBroker(ordinal int, ctxt context.Context, t *Topology) Cons
 		return ConsumerPollResult{}
 	}
 	return ConsumerPollResult{Error: serialization.ReadErrorResponse(resp)}
+}
+
+// Performs a manual commit operation on all brokers in the cluster
+func (c *Client) ManualCommit() ConsumerCommitResult {
+	t := c.Topology()
+	start := time.Now()
+	maxPollInterval := c.consumerOptions.MaxPollInterval
+	ctxt, _ := context.WithDeadline(context.Background(), start.Add(maxPollInterval))
+	brokersLength := t.Length
+	resultChan := make(chan BrokerError)
+
+	for i := 0; i < brokersLength; i++ {
+		ordinal := i
+		go func() {
+			resultChan <- c.manualCommitOnBroker(ordinal, ctxt, t)
+		}()
+	}
+
+	result := ConsumerCommitResult{
+		Errors: make([]BrokerError, 0),
+	}
+
+	for i := 0; i < brokersLength; i++ {
+		err := <-resultChan
+		if err != nil {
+			result.Errors = append(result.Errors, err)
+		} else {
+			result.SuccessCount++
+		}
+	}
+
+	return result
+}
+
+func (c *Client) manualCommitOnBroker(ordinal int, ctxt context.Context, t *Topology) BrokerError {
+	url := fmt.Sprintf("http://%s:%d%s", t.hostName(ordinal), t.ConsumerPort, consumerManualCommitUrl)
+	r, err := http.NewRequestWithContext(ctxt, http.MethodPost, url, nil)
+	utils.PanicIfErr(err)
+	resp, err := c.consumerClient.Do(r)
+	if err != nil {
+		return newBrokerError(err, ordinal)
+	}
+
+	if resp.StatusCode != http.StatusNoContent {
+		return newBrokerError(serialization.ReadErrorResponse(resp), ordinal)
+	}
+	return nil
 }
 
 func (c *Client) Close() {

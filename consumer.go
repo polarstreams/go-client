@@ -18,6 +18,15 @@ type Consumer interface {
 	// Gets a point-in-time value of the number of brokers in the cluster
 	BrokersLength() int
 
+	// Explicitly reports that the data polled has been consumed to all brokers in the cluster.
+	//
+	// When exiting the application cleanly, it's usually recommended to invoke ManualCommit() once before Close() to
+	// make sure other consumer of the group can continue where this consumer left off.
+	//
+	// When polling in loop from a consumer, it's usually not necessary to call ManualCommit() per each pool
+	// as the broker will automatically commit the consumer offsets periodically.
+	ManualCommit() ConsumerCommitResult
+
 	// Closes the consumer
 	//
 	// A Consumer instance is designed to be long-lived. Close() should only be called when no more messages
@@ -91,6 +100,10 @@ type consumer struct {
 
 func (c *consumer) Poll() ConsumerPollResult {
 	return c.client.Poll()
+}
+
+func (c *consumer) ManualCommit() ConsumerCommitResult {
+	return c.client.ManualCommit()
 }
 
 func (p *consumer) BrokersLength() int {
