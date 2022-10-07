@@ -27,7 +27,7 @@ var _ = Describe("Consumer", func ()  {
 	host := env("TEST_DISCOVERY_HOST", "barco")
 	serviceUrl := fmt.Sprintf("barco://%s", host)
 
-	It("should discover the cluster without port and retrieve data", func ()  {
+	It("should retrieve data on different range indices", func ()  {
 		topic := fmt.Sprintf("consumer-test-%d", time.Now().UnixMicro())
 		group := fmt.Sprintf("g%d", time.Now().UnixMicro())
 		p := newTestProducer(serviceUrl)
@@ -39,9 +39,9 @@ var _ = Describe("Consumer", func ()  {
 			`{"hello": "B2_fixed"}`,
 		}
 
-		produce(p, topic, messages[0], partitionKeyT0Range)
-		produce(p, topic, messages[1], partitionKeyT1Range)
-		produce(p, topic, messages[2], partitionKeyT2Range)
+		produce(p, topic, messages[0], "")
+		produce(p, topic, messages[1], "")
+		produce(p, topic, messages[2], "")
 
 		consumer := newTestConsumer(serviceUrl, types.ConsumerOptions{
 			Group:  group,
@@ -63,19 +63,38 @@ var _ = Describe("Consumer", func ()  {
 		Expect(result.Error).NotTo(HaveOccurred())
 		Expect(result.TopicRecords).To(HaveLen(0))
 		Expect(time.Since(start)).To(BeNumerically(">=", maxPollInterval - timerPrecision))
+	})
 
-		messages = make([]string, 0)
+	It("should retrieve sequential data", func ()  {
+		topic := fmt.Sprintf("consumer-seq-test-%d", time.Now().UnixMicro())
+		group := fmt.Sprintf("g%d", time.Now().UnixMicro())
+		p := newTestProducer(serviceUrl)
+		consumer := newTestConsumer(serviceUrl, types.ConsumerOptions{
+			Group:  group,
+			Topics: []string{topic},
+		})
+		defer p.Close()
+		defer consumer.Close()
+
+		messages := make([]string, 0)
 		for i := 0; i < 12; i++ {
 			m := fmt.Sprintf(`{"key": "key%d"}`, i)
-			produce(p, topic, m, "")
+			produce(p, topic, m, partitionKeyT2Range)
 			messages = append(messages, m)
 		}
 
-		topicRecords = pollUntil(consumer, 10)
-		Expect(topicRecords).To(HaveLen(len(messages)))
-		for _, m := range messages {
-			r, _ := findRecord(topicRecords, m)
-			Expect(r).NotTo(BeNil(), "Message '%s' not found", m)
+		topicRecords := pollUntil(consumer, 10)
+		topicId, records := flatten(topicRecords)
+		Expect(len(records)).To(BeNumerically(">=", 10))
+		Expect(topicId.Name).To(ContainSubstring("consumer-seq-test-"))
+		for n, m := range messages {
+			if n == len(records) {
+				// We are not waiting for the flush, let's validate only 10
+				break
+			}
+			r := records[n]
+			Expect(string(r.Body)).To(Equal(m))
+			Expect(r.Offset).To(Equal(int64(n)))
 		}
 	})
 
@@ -113,7 +132,7 @@ var _ = Describe("Consumer", func ()  {
 			defer consumer1_conn2.Close()
 
 			topicRecords = pollUntil(consumer1_conn2, 1)
-			Expect(len(messages)).To(BeNumerically(">", 0))
+			Expect(len(topicRecords[0].Records)).To(BeNumerically(">", 0))
 			Expect(string(topicRecords[0].Records[0].Body)).To(Equal(`{"key": "key0"}`))
 		})
 	})
@@ -160,7 +179,7 @@ var _ = Describe("Consumer", func ()  {
 			defer consumer1_conn2.Close()
 
 			topicRecords = pollUntil(consumer1_conn2, 1)
-			Expect(len(messages)).To(BeNumerically(">", 0))
+			Expect(len(topicRecords[0].Records)).To(BeNumerically(">", 0))
 
 			// Assert that it continued where it left off
 			Expect(string(topicRecords[0].Records[0].Body)).To(Equal(fmt.Sprintf(`{"key": %d}`, len(topicRecords))))
@@ -194,6 +213,24 @@ func findRecord(records []types.TopicRecords, message string) (*types.Record, *t
 		}
 	}
 	return nil, nil
+}
+
+func flatten(topicRecords []types.TopicRecords) (*types.TopicDataId, []types.Record) {
+	if len(topicRecords) == 0 {
+		return nil, nil
+	}
+	topic := topicRecords[0].Topic
+	records := make([]types.Record, 0)
+
+	for _, tr := range topicRecords {
+		if *tr.Topic != *topic {
+			panic(fmt.Sprintf("Topic does not match: %v != %v", *tr.Topic, *topic))
+		}
+		for _, r := range tr.Records {
+			records = append(records, r)
+		}
+	}
+	return topic, records
 }
 
 // Polls few times until the amount of message is what expected as
