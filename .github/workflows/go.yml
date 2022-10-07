@@ -3,10 +3,10 @@ name: Go
 on:
   push:
     branches:
-      - main
-      - debug
+      - "*"
   pull_request:
-    branches: [ main ]
+    branches:
+      - "*"
 
 jobs:
 
@@ -36,6 +36,11 @@ jobs:
     - name: Unit tests
       run: go test -v -p=1 ./...
 
+  integration_test_amd64:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
     - name: Integration tests
       run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
-
