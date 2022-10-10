@@ -22,10 +22,16 @@ func unmarshalTopicRecords(r io.Reader) (*TopicRecords, error) {
 	if err != nil {
 		return nil, err
 	}
+	var startOffset int64
+	if err = binary.Read(r, endianness, &startOffset); err != nil {
+		return nil, err
+	}
 	payloadLength := int32(0)
-	binary.Read(r, endianness, &payloadLength)
-	payload := make([]byte, payloadLength)
+	if err = binary.Read(r, endianness, &payloadLength); err != nil {
+		return nil, err
+	}
 
+	payload := make([]byte, payloadLength)
 	if _, err = io.ReadFull(r, payload); err != nil {
 		return nil, err
 	}
@@ -40,10 +46,11 @@ func unmarshalTopicRecords(r io.Reader) (*TopicRecords, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	recordsReader := bytes.NewReader(uncompressed)
 	item.Records = make([]Record, 0)
 	for recordsReader.Len() > 0 {
-		record, err := unmarshalRecord(recordsReader)
+		record, err := unmarshalRecord(recordsReader, startOffset+int64(len(item.Records)))
 		if err != nil {
 			return nil, err
 		}
@@ -95,7 +102,7 @@ func unmarshalTopicId(r io.Reader) (*TopicDataId, error) {
 	return &topic, nil
 }
 
-func unmarshalRecord(r io.Reader) (Record, error) {
+func unmarshalRecord(r io.Reader, offset int64) (Record, error) {
 	length := uint32(0)
 	timestamp := int64(0)
 	result := Record{}
@@ -103,13 +110,17 @@ func unmarshalRecord(r io.Reader) (Record, error) {
 	if err != nil {
 		return result, err
 	}
+
 	result.Timestamp = time.UnixMicro(timestamp)
+	result.Offset = offset
+
 	err = binary.Read(r, endianness, &length)
 	body := make([]byte, length)
 	n, err := r.Read(body)
 	if err != nil {
 		return result, err
 	}
+
 	result.Body = body[:n]
 	return result, nil
 }

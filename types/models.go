@@ -49,6 +49,7 @@ type TopicRecords struct {
 // Represents a data record from a topic.
 type Record struct {
 	Timestamp time.Time
+	Offset    int64
 	Body      []byte
 }
 
