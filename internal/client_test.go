@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -299,13 +299,13 @@ func produceJson(client *Client, message string, partitionKey string) {
 
 func respBody(resp *http.Response) string {
 	defer bodyClose(resp)
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	Expect(err).NotTo(HaveOccurred())
 	return string(body)
 }
 
 func reqBody(req *http.Request) string {
-	body, err := ioutil.ReadAll(req.Body)
+	body, err := io.ReadAll(req.Body)
 	Expect(err).NotTo(HaveOccurred())
 	return string(body)
 }

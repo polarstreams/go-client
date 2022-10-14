@@ -67,13 +67,12 @@ func (p *producer) Send(topic string, message io.Reader, partitionKey string) er
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
-		defer resp.Body.Close()
-		return nil
-	}
 	body, err := utils.ReadBody(resp)
 	if err != nil {
 		return err
+	}
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		return nil
 	}
 	return fmt.Errorf(body)
 }
