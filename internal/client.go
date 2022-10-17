@@ -29,6 +29,7 @@ const baseReconnectionDelay = 100 * time.Millisecond
 const maxReconnectionDelay = 2 * time.Minute
 const maxOrdinal = 1 << 31
 const defaultDiscoveryPort = 9250
+const producerMaxConnsPerHost = 1
 
 const (
 	discoveryUrl            = "/v1/brokers"
@@ -111,16 +112,14 @@ func NewClient(serviceUrl string, options *ClientOptions) (*Client, error) {
 	}
 
 	client.producerClient = &http.Client{
-		Transport: &http2.Transport{
-			StrictMaxConcurrentStreams: true, // One connection per host
-			AllowHTTP:                  true,
-			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-				// Pretend we are dialing a TLS endpoint.
+		Transport: &http.Transport{
+			MaxConnsPerHost:     producerMaxConnsPerHost,
+			MaxIdleConnsPerHost: producerMaxConnsPerHost,
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return client.dial(network, addr, client.getProducerStatus(addr))
 			},
-			ReadIdleTimeout: 1000 * time.Millisecond,
-			PingTimeout:     1000 * time.Millisecond,
 		},
+		Timeout: 1 * time.Second,
 	}
 
 	client.consumerClient = &http.Client{
@@ -370,6 +369,7 @@ func (c *Client) ProduceJson(topic string, message io.Reader, partitionKey strin
 			}
 		}
 		brokerOrdinal := (ordinal + i) % t.Length
+
 		if !c.isProducerUp(brokerOrdinal, t) {
 			c.logger.Debug("B%d is down, moving to next host", brokerOrdinal)
 		}
@@ -514,6 +514,9 @@ func (c *Client) pollBroker(ordinal int, ctxt context.Context, t *Topology) Cons
 	}
 
 	if resp.StatusCode == http.StatusNoContent {
+		// Read and close body
+		_, _ = utils.ReadBody(resp)
+
 		// TODO: Get Retry-After
 		return ConsumerPollResult{}
 	}
