@@ -7,7 +7,7 @@ services:
     depends_on:
       - barco
   barco:
-    image: "barcostreams/barco:dev2"
+    image: "barcostreams/barco:dev3"
     env_file: "../env/test.env"
     environment:
       - BARCO_DEV_MODE=true
