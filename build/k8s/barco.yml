@@ -99,7 +99,7 @@ spec:
       terminationGracePeriodSeconds: 1
       containers:
       - name: barco
-        image: jorgebay/barco:dev2
+        image: jorgebay/barco:dev5
         imagePullPolicy: Always
         ports:
         - containerPort: 9250
