@@ -87,7 +87,7 @@ spec:
     matchLabels:
       app.kubernetes.io/name: polar
       name: polar
-  servicename: polar
+  serviceName: polar
   replicas: 3
   template:
     metadata:
@@ -95,7 +95,7 @@ spec:
         app.kubernetes.io/name: polar
         name: polar
     spec:
-      serviceAccountname: polar
+      serviceAccountName: polar
       terminationGracePeriodSeconds: 1
       containers:
       - name: polar
