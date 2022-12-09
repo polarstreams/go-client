@@ -36,7 +36,142 @@ jobs:
     - name: Unit tests
       run: go test -v -p=1 ./...
 
-  integration_test_amd64:
+  integration_test_amd64_0:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_1:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_2:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_3:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_4:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_5:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_6:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_7:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_8:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_9:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_10:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_11:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_12:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_13:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_14:
+    name: "Integration tests on amd64"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Integration tests
+      run: docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test
+
+  integration_test_amd64_15:
     name: "Integration tests on amd64"
     runs-on: ubuntu-latest
     steps:
