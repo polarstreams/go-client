@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"time"
 
-	. "github.com/barcostreams/go-client/types"
+	. "github.com/polarstreams/go-client/types"
 	"github.com/klauspost/compress/zstd"
 )
 
 var endianness = binary.BigEndian
 
-const consumerContentType = "application/vnd.barco.consumermessage"
+const consumerContentType = "application/vnd.polar.consumermessage"
 
 func unmarshalTopicRecords(r io.Reader) (*TopicRecords, error) {
 	var err error

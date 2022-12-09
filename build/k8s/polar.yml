@@ -2,11 +2,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: barco
-  namespace: barco
+  name: polar
+  namespace: polar
 spec:
   selector:
-    name: barco
+    name: polar
   ports:
   - name: discovery
     protocol: TCP
@@ -20,14 +20,14 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: barco
-  namespace: barco
+  name: polar
+  namespace: polar
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: barco
-  namespace: barco
+  name: polar
+  namespace: polar
 rules:
   - apiGroups: [""]
     resources: ["configmaps"]
@@ -36,21 +36,21 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: barco
-  namespace: barco
+  name: polar
+  namespace: polar
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: barco
+  name: polar
 subjects:
   - kind: ServiceAccount
-    name: barco
-    namespace: barco
+    name: polar
+    namespace: polar
 ---
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: barco
+  name: polar
 rules:
   - apiGroups: [""]
     resources: ["events"]
@@ -65,41 +65,41 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: barco
+  name: polar
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: barco
+  name: polar
 subjects:
   - kind: ServiceAccount
-    name: barco
-    namespace: barco
+    name: polar
+    namespace: polar
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: barco
-  namespace: barco
+  name: polar
+  namespace: polar
   labels:
-      app.kubernetes.io/name: barco
+      app.kubernetes.io/name: polar
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: barco
-      name: barco
-  serviceName: barco
+      app.kubernetes.io/name: polar
+      name: polar
+  servicename: polar
   replicas: 3
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: barco
-        name: barco
+        app.kubernetes.io/name: polar
+        name: polar
     spec:
-      serviceAccountName: barco
+      serviceAccountname: polar
       terminationGracePeriodSeconds: 1
       containers:
-      - name: barco
-        image: jorgebay/barco:dev5
+      - name: polar
+        image: polarstreams/polar:dev1
         imagePullPolicy: Always
         ports:
         - containerPort: 9250
@@ -107,13 +107,13 @@ spec:
         - containerPort: 9251
           name: producer
         env:
-        - name: BARCO_SERVICE_NAME
-          value: barco
-        - name: BARCO_POD_NAME
+        - name: POLAR_SERVICE_NAME
+          value: polar
+        - name: POLAR_POD_NAME
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        - name: BARCO_POD_NAMESPACE
+        - name: POLAR_POD_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace

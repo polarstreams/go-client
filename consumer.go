@@ -1,15 +1,15 @@
-package barco
+package polar
 
 import (
 	"fmt"
 	"os"
 
-	. "github.com/barcostreams/go-client/internal"
-	. "github.com/barcostreams/go-client/types"
+	. "github.com/polarstreams/go-client/internal"
+	. "github.com/polarstreams/go-client/types"
 	"github.com/google/uuid"
 )
 
-// Represents a Barco client that reads records from a cluster.
+// Represents a PolarStreams client that reads records from a cluster.
 type Consumer interface {
 	// Retrieves  data for the topics subscribed.
 	// On each poll, consumer will try to use the last consumed offset as the starting offset and fetch sequentially.
@@ -34,7 +34,7 @@ type Consumer interface {
 	Close()
 }
 
-// NewConsumer creates a new Consumer, discovers the barco cluster and subscribes to the topic provided.
+// NewConsumer creates a new Consumer, discovers the PolarStreams cluster and subscribes to the topic provided.
 func NewConsumer(serviceUrl string, consumerGroup string, topic string) (Consumer, error) {
 	options := ConsumerOptions{
 		Group:  consumerGroup,
@@ -47,7 +47,7 @@ func NewConsumer(serviceUrl string, consumerGroup string, topic string) (Consume
 
 // NewConsumer creates a new Consumer with the provided options.
 //
-// It discovers the barco cluster and subscribes to the topics provided.
+// It discovers the PolarStreams cluster and subscribes to the topics provided.
 func NewConsumerWithOpts(serviceUrl string, options ConsumerOptions) (Consumer, error) {
 	hostName, err := os.Hostname()
 	if err != nil {

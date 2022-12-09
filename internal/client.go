@@ -16,9 +16,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/barcostreams/go-client/internal/serialization"
-	"github.com/barcostreams/go-client/internal/utils"
-	. "github.com/barcostreams/go-client/types"
+	"github.com/polarstreams/go-client/internal/serialization"
+	"github.com/polarstreams/go-client/internal/utils"
+	. "github.com/polarstreams/go-client/types"
 	"golang.org/x/net/context"
 	"golang.org/x/net/http2"
 )
@@ -71,8 +71,8 @@ func NewClient(serviceUrl string, options *ClientOptions) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if u.Scheme != "barco" {
-		return nil, fmt.Errorf("Invalid scheme: %s, expected 'barco'", u.Scheme)
+	if u.Scheme != "polar" {
+		return nil, fmt.Errorf("Invalid scheme: %s, expected 'polar'", u.Scheme)
 	}
 	if options == nil {
 		options = &ClientOptions{}
@@ -571,7 +571,7 @@ func (c *Client) manualCommitOnBroker(ordinal int, ctxt context.Context, t *Topo
 }
 
 func (c *Client) Close() {
-	c.logger.Info("Barco client closing")
+	c.logger.Info("PolarStreams client closing")
 	atomic.StoreInt64(&c.isClosing, 1)
 	c.discoveryClient.CloseIdleConnections()
 	c.producerClient.CloseIdleConnections()

@@ -6,31 +6,31 @@ services:
       dockerfile: ./build/container/Dockerfile.it
     environment:
       - TEST_EXPECTED_BROKERS=3
-      - TEST_DISCOVERY_HOST=barco_0
+      - TEST_DISCOVERY_HOST=polar_0
     depends_on:
-      - barco_0
-  barco_0:
-    image: "barcostreams/barco:dev5"
+      - polar_0
+  polar_0:
+    image: "polarstreams/polar:dev1"
     env_file: "../env/test.env"
     environment:
-      - BARCO_BROKER_NAMES=barco_0,barco_1,barco_2
-      - BARCO_ORDINAL=0
+      - POLAR_BROKER_NAMES=polar_0,polar_1,polar_2
+      - POLAR_ORDINAL=0
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9250/status"]
       interval: 1s
       start_period: 10s
-  barco_1:
-    image: "barcostreams/barco:dev5"
+  polar_1:
+    image: "polarstreams/polar:dev1"
     env_file: "../env/test.env"
     environment:
-      - BARCO_BROKER_NAMES=barco_0,barco_1,barco_2
-      - BARCO_ORDINAL=1
-  barco_2:
-    image: "barcostreams/barco:dev5"
+      - POLAR_BROKER_NAMES=polar_0,polar_1,polar_2
+      - POLAR_ORDINAL=1
+  polar_2:
+    image: "polarstreams/polar:dev1"
     env_file: "../env/test.env"
     environment:
-      - BARCO_BROKER_NAMES=barco_0,barco_1,barco_2
-      - BARCO_ORDINAL=2
+      - POLAR_BROKER_NAMES=polar_0,polar_1,polar_2
+      - POLAR_ORDINAL=2
 
 # Use
 # docker-compose -f build/compose/docker-compose-cluster.yml up -V --remove-orphans --build --abort-on-container-exit --exit-code-from client_test

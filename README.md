@@ -1,22 +1,22 @@
-# Go Client for Barco Streams
+# Go Client for PolarStreams
 
-Go Client for Barco Streams. Barco is a lightweight, elastic, kubernetes-native event streaming system.
+Go Client for PolarStreams. PolarStreams is a lightweight, elastic, kubernetes-native event streaming system.
 
 ## Installing
 
 ```shell
-go get github.com/barcostreams/go-client
+go get github.com/polarstreams/go-client
 ```
 
-![go build](https://github.com/barcostreams/go-client/actions/workflows/go.yml/badge.svg)
+![go build](https://github.com/polarstreams/go-client/actions/workflows/go.yml/badge.svg)
 
 ## Getting started
 
-To start using the Go Client for Barco Streams, import the client package and set the Barco "service Url" when creating
-a `Producer` or `Consumer`.
+To start using the Go Client for PolarStreams, import the client package and set the PolarStreams "service Url" when
+creating a `Producer` or `Consumer`.
 
-A service Url is composed by the `barco://` scheme followed by the host name or Kubernetes service name,
-for example: `barco://barco.streams` refers to the service `barco` in the `streams` namespace.
+A service Url is composed by the `polar://` scheme followed by the host name or Kubernetes service name,
+for example: `polar://polar.streams` refers to the service `polar` in the `streams` namespace.
 
 ### Producing messages
 
@@ -28,17 +28,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/barcostreams/go-client"
+	"github.com/polarstreams/go-client"
 )
 
 // ...
 
-producer, err := barco.NewProducer("barco://barco.streams")
+producer, err := polar.NewProducer("polar://polar.streams")
 if err != nil {
 	panic(err)
 }
 
-fmt.Printf("Discovered a Barco cluster with %d brokers\n", producer.BrokersLength())
+fmt.Printf("Discovered a PolarStreams cluster with %d brokers\n", producer.BrokersLength())
 
 topic := "my-first-topic" // The topic will be automatically created
 message := strings.NewReader(`{"hello": "world"}`)
@@ -63,14 +63,14 @@ from a different set of the partitions within the topic.
 import (
 	"fmt"
 
-	"github.com/barcostreams/go-client"
+	"github.com/polarstreams/go-client"
 )
 
 
 // ...
 
 group := "group1"
-consumer, err := barco.NewConsumer("barco://barco.streams", group, topic)
+consumer, err := polar.NewConsumer("polar://polar.streams", group, topic)
 if err != nil {
 	panic(err)
 }

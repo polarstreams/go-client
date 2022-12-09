@@ -1,4 +1,4 @@
-module github.com/barcostreams/go-client
+module github.com/polarstreams/go-client
 
 go 1.17
 
