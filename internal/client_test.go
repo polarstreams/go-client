@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/barcostreams/go-client/types"
+	"github.com/polarstreams/go-client/types"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"golang.org/x/net/http2"
@@ -39,7 +39,7 @@ var _ = Describe("Client", func() {
 	// for i in {2..3}; do sudo ifconfig lo0 alias 127.0.0.$i up; done
 	Describe("NewClient()", func() {
 		It("should parse the url and set the http client", func() {
-			client, err := NewClient("barco://my-host:1234/", nil)
+			client, err := NewClient("polar://my-host:1234/", nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(client.discoveryUrl).To(Equal("http://my-host:1234/v1/brokers"))
 		})
@@ -55,7 +55,7 @@ var _ = Describe("Client", func() {
 	Describe("Connect()", func() {
 		var server *httptest.Server
 		discoveryAddress := ""
-		const baseName = "barco_sample-"
+		const baseName = "polar_sample-"
 		var counter int64
 
 		BeforeEach(func() {
@@ -82,7 +82,7 @@ var _ = Describe("Client", func() {
 		})
 
 		It("should retrieve and store the topology", func() {
-			client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress), nil)
+			client, err := NewClient(fmt.Sprintf("polar://%s", discoveryAddress), nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(client.Connect()).NotTo(HaveOccurred())
 			defer client.Close()
@@ -96,7 +96,7 @@ var _ = Describe("Client", func() {
 
 		It("should start polling in the background", func() {
 			const pollInterval = 100 * time.Millisecond
-			client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress), nil)
+			client, err := NewClient(fmt.Sprintf("polar://%s", discoveryAddress), nil)
 			Expect(err).NotTo(HaveOccurred())
 			client.topologyPollInterval = pollInterval
 			Expect(client.Connect()).NotTo(HaveOccurred())
@@ -330,7 +330,7 @@ func newTestClient(discoveryAddress string) *Client {
 		Logger:                 types.StdLogger,
 		FixedReconnectionDelay: reconnectionDelay,
 	}
-	client, err := NewClient(fmt.Sprintf("barco://%s", discoveryAddress), &options)
+	client, err := NewClient(fmt.Sprintf("polar://%s", discoveryAddress), &options)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(client.Connect()).NotTo(HaveOccurred())
 	return client

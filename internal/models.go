@@ -5,7 +5,7 @@ import "fmt"
 const contentType = "application/json"
 
 type Topology struct {
-	BaseName     string   `json:"baseName,omitempty"` // When defined, it represents the base name to build the broker names, e.g. "barco-"
+	BaseName     string   `json:"baseName,omitempty"` // When defined, it represents the base name to build the broker names, e.g. "polar-"
 	Length       int      `json:"length"`             // The ring size
 	BrokerNames  []string `json:"names,omitempty"`
 	ProducerPort int      `json:"producerPort"`

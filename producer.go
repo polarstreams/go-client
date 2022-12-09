@@ -1,16 +1,16 @@
-package barco
+package polar
 
 import (
 	"fmt"
 	"io"
 	"net/http"
 
-	. "github.com/barcostreams/go-client/internal"
-	"github.com/barcostreams/go-client/internal/utils"
-	"github.com/barcostreams/go-client/types"
+	. "github.com/polarstreams/go-client/internal"
+	"github.com/polarstreams/go-client/internal/utils"
+	"github.com/polarstreams/go-client/types"
 )
 
-// Represents a Barco client that publishes records in a cluster.
+// Represents a PolarStreams client that publishes records in a cluster.
 type Producer interface {
 	// Sends a message to a topic
 	Send(topic string, message io.Reader, partitionKey string) error
@@ -25,7 +25,7 @@ type Producer interface {
 	Close()
 }
 
-// NewProducer creates a new Producer and discovers the barco cluster.
+// NewProducer creates a new Producer and discovers the PolarStreams cluster.
 //
 // A Producer instance is designed to be long-lived and it should be reused across the application.
 func NewProducer(serviceUrl string) (Producer, error) {
@@ -40,7 +40,7 @@ func fromProducerOptions(o *types.ProducerOptions) *ClientOptions {
 	}
 }
 
-// NewProducer creates a new Producer with the provided options and discovers the barco cluster.
+// NewProducer creates a new Producer with the provided options and discovers the PolarStreams cluster.
 //
 // A Producer instance is designed to be long-lived and it should be reused across the application.
 func NewProducerWithOpts(serviceUrl string, options types.ProducerOptions) (Producer, error) {

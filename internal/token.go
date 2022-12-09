@@ -4,7 +4,7 @@ import (
 	"math"
 	"sort"
 
-	. "github.com/barcostreams/go-client/types"
+	. "github.com/polarstreams/go-client/types"
 )
 
 const startToken Token = math.MinInt64

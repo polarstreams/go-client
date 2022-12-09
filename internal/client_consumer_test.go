@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"time"
 
-	"github.com/barcostreams/go-client/internal/serialization"
-	. "github.com/barcostreams/go-client/types"
+	"github.com/polarstreams/go-client/internal/serialization"
+	. "github.com/polarstreams/go-client/types"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )

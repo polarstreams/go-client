@@ -5,12 +5,12 @@ services:
       context: ../../
       dockerfile: ./build/container/Dockerfile.it
     depends_on:
-      - barco
-  barco:
-    image: "barcostreams/barco:dev5"
+      - polar
+  polar:
+    image: "polarstreams/polar:dev1"
     env_file: "../env/test.env"
     environment:
-      - BARCO_DEV_MODE=true
+      - POLAR_DEV_MODE=true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9250/status"]
       interval: 1s

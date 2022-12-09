@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	. "github.com/barcostreams/go-client"
-	"github.com/barcostreams/go-client/types"
+	. "github.com/polarstreams/go-client"
+	"github.com/polarstreams/go-client/types"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -37,10 +37,10 @@ var _ = Describe("Producer", func ()  {
 	}
 
 	const topic = "producer-test"
-	host := env("TEST_DISCOVERY_HOST", "barco")
+	host := env("TEST_DISCOVERY_HOST", "polar")
 
 	It("should discover the cluster with port and send data", func ()  {
-		producer := newTestProducer(fmt.Sprintf("barco://%s:%d", host, discoveryPort))
+		producer := newTestProducer(fmt.Sprintf("polar://%s:%d", host, discoveryPort))
 		defer producer.Close()
 		err := producer.Send(topic, strings.NewReader(`{"hello": 1}`), partitionKeyT0Range)
 		Expect(err).NotTo(HaveOccurred())
@@ -48,7 +48,7 @@ var _ = Describe("Producer", func ()  {
 	})
 
 	It("should discover the cluster without port and send data", func ()  {
-		producer := newTestProducer(fmt.Sprintf("barco://%s", host))
+		producer := newTestProducer(fmt.Sprintf("polar://%s", host))
 		defer producer.Close()
 		err := producer.Send(topic, strings.NewReader(`{"hello": 2}`), partitionKeyT0Range)
 		Expect(err).NotTo(HaveOccurred())

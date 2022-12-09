@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/barcostreams/go-client"
-	"github.com/barcostreams/go-client/types"
+	. "github.com/polarstreams/go-client"
+	"github.com/polarstreams/go-client/types"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -24,8 +24,8 @@ var _ = Describe("Consumer", func ()  {
 		expectedBrokers = 3
 	}
 
-	host := env("TEST_DISCOVERY_HOST", "barco")
-	serviceUrl := fmt.Sprintf("barco://%s", host)
+	host := env("TEST_DISCOVERY_HOST", "polar")
+	serviceUrl := fmt.Sprintf("polar://%s", host)
 
 	It("should retrieve data on different range indices", func ()  {
 		topic := fmt.Sprintf("consumer-test-%d", time.Now().UnixMicro())

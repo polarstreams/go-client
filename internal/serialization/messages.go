@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/barcostreams/go-client/internal/utils"
+	"github.com/polarstreams/go-client/internal/utils"
 )
 
 // Message for registering a consumer
