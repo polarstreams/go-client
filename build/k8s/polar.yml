@@ -99,7 +99,7 @@ spec:
       terminationGracePeriodSeconds: 1
       containers:
       - name: polar
-        image: polarstreams/polar:dev1
+        image: polarstreams/polar:dev3
         imagePullPolicy: Always
         ports:
         - containerPort: 9250

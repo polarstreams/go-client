@@ -7,7 +7,7 @@ services:
     depends_on:
       - polar
   polar:
-    image: "polarstreams/polar:dev1"
+    image: "polarstreams/polar:dev3"
     env_file: "../env/test.env"
     environment:
       - POLAR_DEV_MODE=true

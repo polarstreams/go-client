@@ -10,7 +10,7 @@ services:
     depends_on:
       - polar_0
   polar_0:
-    image: "polarstreams/polar:dev1"
+    image: "polarstreams/polar:dev3"
     env_file: "../env/test.env"
     environment:
       - POLAR_BROKER_NAMES=polar_0,polar_1,polar_2
@@ -20,13 +20,13 @@ services:
       interval: 1s
       start_period: 10s
   polar_1:
-    image: "polarstreams/polar:dev1"
+    image: "polarstreams/polar:dev3"
     env_file: "../env/test.env"
     environment:
       - POLAR_BROKER_NAMES=polar_0,polar_1,polar_2
       - POLAR_ORDINAL=1
   polar_2:
-    image: "polarstreams/polar:dev1"
+    image: "polarstreams/polar:dev3"
     env_file: "../env/test.env"
     environment:
       - POLAR_BROKER_NAMES=polar_0,polar_1,polar_2
