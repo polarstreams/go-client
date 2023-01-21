@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/polarstreams/go-client/types"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/polarstreams/go-client/types"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/google/uuid"
 	. "github.com/polarstreams/go-client/internal"
 	. "github.com/polarstreams/go-client/types"
-	"github.com/google/uuid"
 )
 
 // Represents a PolarStreams client that reads records from a cluster.

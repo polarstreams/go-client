@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	. "github.com/polarstreams/go-client/types"
 	"github.com/klauspost/compress/zstd"
+	. "github.com/polarstreams/go-client/types"
 )
 
 var endianness = binary.BigEndian

@@ -8,10 +8,10 @@ import (
 	"net/http/httptest"
 	"time"
 
-	"github.com/polarstreams/go-client/internal/serialization"
-	. "github.com/polarstreams/go-client/types"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/polarstreams/go-client/internal/serialization"
+	. "github.com/polarstreams/go-client/types"
 )
 
 var _ = Describe("Client", func() {
