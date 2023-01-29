@@ -58,7 +58,7 @@ func newConnection(address string, h disconnectHandler, flushThreshold int, logg
 		logger:            logger,
 		streamIds:         make(chan StreamId, maxStreamIds),
 		flushThreshold:    flushThreshold,
-		requests:          make(chan BinaryRequest, 512),
+		requests:          make(chan BinaryRequest, 128),
 	}
 
 	// Reserve StreamId(0) for the Startup message
@@ -87,11 +87,48 @@ func newConnection(address string, h disconnectHandler, flushThreshold int, logg
 	return c, nil
 }
 
-func (c *connection) close() {
+// Creates the response handler, appends the request and waits for the response
+func (c *connection) Send(req BinaryRequest) (resp BinaryResponse) {
+	defer func() {
+        if r := recover(); r != nil {
+			resp = NewClientErrorResponse("Request could not be sent: connection closed")
+        }
+    }()
+	response := make(chan BinaryResponse, 1)
+	streamId := <- c.streamIds
+	c.handlers.Store(streamId, func(r BinaryResponse) {
+		response <- r
+	})
+	req.SetStreamId(streamId)
+
+	// Append the request, it might panic when requests channel is closed
+	c.requests <- req
+	// Wait for the response
+	resp = <-response
+	return resp
+}
+
+func (c *connection) Close() {
 	c.closeOnce.Do(func() {
+		close(c.requests)
 		_ = c.conn.Close()
 		c.disconnectHandler.OnConnectionClose(c)
 	})
+
+	toDelete := make([]StreamId, 0)
+	c.handlers.Range(func (key, value interface{}) bool {
+		toDelete = append(toDelete, key.(StreamId))
+		return true
+	})
+
+	for _, streamId := range toDelete {
+		h, loaded := c.handlers.LoadAndDelete(streamId)
+		if !loaded {
+			continue
+		}
+		handler := h.(func(BinaryResponse))
+		handler(NewClientErrorResponse("Request could not be sent: connection closed"))
+	}
 }
 
 func (c *connection) receiveResponses() {
@@ -113,11 +150,7 @@ func (c *connection) receiveResponses() {
 			break
 		}
 
-		h, loaded := c.handlers.LoadAndDelete(header.StreamId)
-		if !loaded {
-			panic(fmt.Sprintf("No handler for stream id %d", header.StreamId))
-		}
-		handler := h.(streamHandler)
+		handler := c.getHandler(header.StreamId)
 		var response BinaryResponse
 		if header.BodyLength == 0 {
 			response = NewEmptyResponse(header.Op)
@@ -125,6 +158,8 @@ func (c *connection) receiveResponses() {
 			buf := bodyBuffer[:header.BodyLength]
 			_, err := io.ReadFull(c.conn, buf)
 			if err != nil {
+				// The handler was dequeued, surface the error
+				handler(NewClientErrorResponse("Error reading body from server"))
 				c.logger.Debug("Error reading body from binary server: %s", err)
 				break
 			}
@@ -136,7 +171,17 @@ func (c *connection) receiveResponses() {
 
 		handler(response)
 	}
-	c.close()
+
+	c.Close()
+}
+
+// Gets and deletes the handler from the pending handlers
+func (c *connection) getHandler(id StreamId) streamHandler {
+	h, loaded := c.handlers.LoadAndDelete(id)
+	if !loaded {
+		panic(fmt.Sprintf("No handler for stream id %d", id))
+	}
+	return h.(func(BinaryResponse))
 }
 
 func totalRequestSize(r BinaryRequest) int {
@@ -148,10 +193,11 @@ func (c *connection) sendRequests() {
 
 	shouldExit := false
 	var item BinaryRequest
+	var group []BinaryRequest
 	for !shouldExit {
 		w.Reset()
 		groupSize := 0
-		group := make([]BinaryRequest, 0)
+		group = make([]BinaryRequest, 0)
 		canAddNext := true
 
 		if item == nil {
@@ -204,7 +250,18 @@ func (c *connection) sendRequests() {
 			}
 		}
 	}
-	c.close()
+
+	// Close in-flight group
+	for _, request := range group {
+		streamId := request.StreamId()
+		if streamId == nil {
+			panic("Invalid nil stream id")
+		}
+		handler := c.getHandler(*streamId)
+		handler(NewClientErrorResponse("Error while sending request"))
+	}
+
+	c.Close()
 }
 
 type connectionSet map[*connection]bool
@@ -249,7 +306,7 @@ func (p *producerConnectionPool) Close() {
 
 	pool := p.getConnections()
 	for c := range pool {
-		c.close()
+		c.Close()
 	}
 }
 
@@ -295,7 +352,7 @@ func (p *producerConnectionPool) startConnecting() {
 
 		if p.isPoolClosed() {
 			p.mu.Unlock()
-			c.close()
+			c.Close()
 			return
 		}
 

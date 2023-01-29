@@ -38,6 +38,7 @@ const (
 	ServerError         ErrorCode = 0
 	RoutingError        ErrorCode = 1
 	LeaderNotFoundError ErrorCode = 2
+	ClientError         ErrorCode = 255
 )
 
 // Header for producer messages. Order of fields defines the serialization format.
@@ -55,6 +56,12 @@ var HeaderSize = binarySize(BinaryHeader{})
 type BinaryRequest interface {
 	Marshal(w *bytes.Buffer) error
 	BodyLength() int
+
+	// Sets the stream id in a thread safe manner
+	SetStreamId(id StreamId)
+
+	// Gets the stream id in a thread safe manner
+	StreamId() *StreamId
 }
 
 type BinaryResponse interface {
@@ -77,6 +84,13 @@ func (r *emptyResponse) Op() OpCode {
 type ErrorResponse struct {
 	Code    ErrorCode
 	Message string
+}
+
+func NewClientErrorResponse(message string) BinaryResponse {
+	return &ErrorResponse{
+		Code:    ClientError,
+		Message: message,
+	}
 }
 
 func (r *ErrorResponse) Op() OpCode {
@@ -105,5 +119,27 @@ func WriteHeader(w *bytes.Buffer, header *BinaryHeader) error {
 	headerBuf := buf[len(buf)-HeaderSize:]
 	crc := crc32.ChecksumIEEE(headerBuf[:len(headerBuf)-crcByteSize])
 	Endianness.PutUint32(headerBuf[len(headerBuf)-crcByteSize:], crc)
+	return nil
+}
+
+type ProduceRequest struct {
+}
+
+func (r *ProduceRequest) Marshal(w *bytes.Buffer) error {
+	// TODO: IMPLEMENT
+	return nil
+}
+
+func (r *ProduceRequest) BodyLength() int {
+	// TODO: IMPLEMENT
+	return 0
+}
+
+func (r *ProduceRequest) SetStreamId(id StreamId) {
+	// TODO: IMPLEMENT
+}
+
+func (r *ProduceRequest) StreamId() *StreamId {
+	// TODO: IMPLEMENT
 	return nil
 }
