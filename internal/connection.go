@@ -10,7 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/polarstreams/go-client/internal/serialization/producer"
 	. "github.com/polarstreams/go-client/internal/serialization/producer"
+	. "github.com/polarstreams/go-client/internal/types"
 	. "github.com/polarstreams/go-client/types"
 )
 
@@ -34,7 +36,7 @@ func newConnection(address string, h disconnectHandler, flushThreshold int, logg
 		return nil, err
 	}
 
-	w := bytes.NewBuffer(make([]byte, HeaderSize))
+	w := bytes.NewBuffer(make([]byte, 0, HeaderSize))
 	if err := WriteHeader(w, &BinaryHeader{
 		Version:  1,
 		StreamId: 0,
@@ -88,18 +90,19 @@ func newConnection(address string, h disconnectHandler, flushThreshold int, logg
 }
 
 // Creates the response handler, appends the request and waits for the response
-func (c *connection) Send(req BinaryRequest) (resp BinaryResponse) {
+func (c *connection) Send(topic string, message FixedLengthReader, partitionKey string) (resp BinaryResponse) {
 	defer func() {
-        if r := recover(); r != nil {
+		if r := recover(); r != nil {
 			resp = NewClientErrorResponse("Request could not be sent: connection closed")
-        }
-    }()
+		}
+	}()
+
+	streamId := <-c.streamIds
+	req := producer.NewProduceRequest(streamId, topic, message, partitionKey)
 	response := make(chan BinaryResponse, 1)
-	streamId := <- c.streamIds
 	c.handlers.Store(streamId, func(r BinaryResponse) {
 		response <- r
 	})
-	req.SetStreamId(streamId)
 
 	// Append the request, it might panic when requests channel is closed
 	c.requests <- req
@@ -110,13 +113,14 @@ func (c *connection) Send(req BinaryRequest) (resp BinaryResponse) {
 
 func (c *connection) Close() {
 	c.closeOnce.Do(func() {
+		c.logger.Debug("Connection to %s closed", c.conn.RemoteAddr().String())
 		close(c.requests)
 		_ = c.conn.Close()
 		c.disconnectHandler.OnConnectionClose(c)
 	})
 
 	toDelete := make([]StreamId, 0)
-	c.handlers.Range(func (key, value interface{}) bool {
+	c.handlers.Range(func(key, value interface{}) bool {
 		toDelete = append(toDelete, key.(StreamId))
 		return true
 	})
@@ -133,20 +137,13 @@ func (c *connection) Close() {
 
 func (c *connection) receiveResponses() {
 	header := &BinaryHeader{}
-	headerBuffer := make([]byte, HeaderSize)
-	headerReader := bytes.NewReader(headerBuffer)
 	bodyBuffer := make([]byte, ResponseBodyMaxLength)
 
 	for {
-		_, err := io.ReadFull(c.conn, headerBuffer)
-		if err != nil {
-			c.logger.Debug("Error reading from binary server: %s", err)
-			break
-		}
-		headerReader.Reset(headerBuffer)
-		err = binary.Read(headerReader, Endianness, &header)
-		if err != nil {
-			c.logger.Debug("Error reading header from binary server: %s", err)
+		if err := binary.Read(c.conn, Endianness, header); err != nil {
+			if err != io.EOF {
+				c.logger.Debug("Error reading header from binary server: %s", err)
+			}
 			break
 		}
 
@@ -190,6 +187,7 @@ func totalRequestSize(r BinaryRequest) int {
 
 func (c *connection) sendRequests() {
 	w := bytes.NewBuffer(make([]byte, c.flushThreshold))
+	header := &BinaryHeader{Version: 1, Flags: 0} // Reuse allocation
 
 	shouldExit := false
 	var item BinaryRequest
@@ -221,14 +219,14 @@ func (c *connection) sendRequests() {
 					shouldExit = true
 					break
 				}
-				responseSize := totalRequestSize(request)
-				if responseSize+w.Len() > c.flushThreshold {
+				requestSize := totalRequestSize(request)
+				if groupSize+requestSize > c.flushThreshold {
 					canAddNext = false
 					item = request
 					break
 				}
 				group = append(group, request)
-				groupSize += responseSize
+				groupSize += requestSize
 
 			default:
 				canAddNext = false
@@ -236,8 +234,8 @@ func (c *connection) sendRequests() {
 		}
 
 		for _, request := range group {
-			if err := request.Marshal(w); err != nil {
-				c.logger.Warn("There was an error while marshaling a request, closing connection: %s", err)
+			if err := request.Marshal(w, header); err != nil {
+				c.logger.Error("Error marshaling a request, closing connection: %s", err)
 				shouldExit = true
 				break
 			}
@@ -254,10 +252,7 @@ func (c *connection) sendRequests() {
 	// Close in-flight group
 	for _, request := range group {
 		streamId := request.StreamId()
-		if streamId == nil {
-			panic("Invalid nil stream id")
-		}
-		handler := c.getHandler(*streamId)
+		handler := c.getHandler(streamId)
 		handler(NewClientErrorResponse("Error while sending request"))
 	}
 
@@ -275,24 +270,47 @@ type streamHandler func(r BinaryResponse)
 // Represents a group of connections to a single producer
 type producerConnectionPool struct {
 	address                  string
-	length                   int          // The amount of expected connections
-	connections              atomic.Value // Copy-on-write connections
+	length                   int           // The amount of expected connections
+	connectionsSnapshot      atomic.Value  // Connections collection with snapshot semantics ([]*connection)
+	connections              connectionSet // Copy-on-write connections, must be accessed taking the lock
 	mu                       sync.Mutex
 	isConnecting             int32
 	isClosed                 int32
 	logger                   Logger
 	connectionFlushThreshold int
+	index                    uint32        // Used for round robin through connections
+	initHandler              func()        // Invoked once after the first connection attempt is made (success or error)
+	initOnce                 sync.Once     // Use to control the init handler call
+	reconnectionBackoff      BackoffPolicy // Reconnection backoff
 }
 
-func newProducerConnectionPool(length int, connectionFlushThreshold int, logger Logger) *producerConnectionPool {
+func newProducerConnectionPool(
+	address string,
+	length int,
+	connectionFlushThreshold int,
+	logger Logger,
+	fixedReconnectionDelay time.Duration, // To simplify test
+	initHandler func(),
+) *producerConnectionPool {
+	var reconnectionBackoff BackoffPolicy = newExponentialBackoff()
+	if fixedReconnectionDelay > 0 {
+		reconnectionBackoff = &fixedBackoff{delay: fixedReconnectionDelay}
+	}
+
 	p := &producerConnectionPool{
+		address:                  address,
 		length:                   length,
-		connections:              atomic.Value{},
+		connectionsSnapshot:      atomic.Value{},
+		connections:              map[*connection]bool{},
 		mu:                       sync.Mutex{},
 		isConnecting:             0,
 		isClosed:                 0,
 		logger:                   logger,
 		connectionFlushThreshold: connectionFlushThreshold,
+		index:                    0,
+		initHandler:              initHandler,
+		initOnce:                 sync.Once{},
+		reconnectionBackoff:      reconnectionBackoff,
 	}
 
 	go p.startConnecting()
@@ -304,7 +322,7 @@ func (p *producerConnectionPool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	pool := p.getConnections()
+	pool := p.connections
 	for c := range pool {
 		c.Close()
 	}
@@ -313,12 +331,38 @@ func (p *producerConnectionPool) Close() {
 func (p *producerConnectionPool) OnConnectionClose(c *connection) {
 	// Use a different go routine as we might be holding the lock
 	go func() {
-		p.mu.Lock()
-		defer p.mu.Unlock()
 		if p.isPoolClosed() {
-			p.addOrDelete(c, true)
+			return
 		}
+
+		// Remove the existing connection from the pool
+		p.mu.Lock()
+		p.addOrDelete(c, true)
+		p.mu.Unlock()
+
+		// Start reconnecting
+		p.startConnecting()
 	}()
+}
+
+// Gets the next available connection or nil
+func (p *producerConnectionPool) NextConnection() *connection {
+	connections := p.getConnections()
+	length := len(connections)
+	if length == 0 {
+		return nil
+	}
+	if length == 1 {
+		return connections[0]
+	}
+
+	index := atomic.AddUint32(&p.index, 1)
+	if index >= maxAtomicIncrement {
+		// Atomic inc operations don't wrap around, reset it (good-enough fairness)
+		atomic.StoreUint32(&p.index, 0)
+	}
+	return connections[(int(index)-1)%length]
+
 }
 
 // Determines whether the pool is closed, we should hold the lock in case the check is important
@@ -334,20 +378,27 @@ func (p *producerConnectionPool) startConnecting() {
 
 	defer atomic.StoreInt32(&p.isConnecting, 0)
 
-	backoff := newExponentialBackoff()
+	p.reconnectionBackoff.Reset()
 	existing := p.getConnections()
-	for len(existing) < p.length && p.isPoolClosed() {
+
+	for len(existing) < p.length && !p.isPoolClosed() {
+		p.logger.Info("Creating new producer connection to %s", p.address)
 		c, err := newConnection(p.address, p, p.connectionFlushThreshold, p.logger)
+
+		// Mark as initialized, even on error
+		p.initOnce.Do(p.initHandler)
+
 		if err != nil {
 			if p.isPoolClosed() {
 				return
 			}
 
-			time.Sleep(backoff.next())
+			p.logger.Info("Error while opening a new connection to %s: %s", p.address, err.Error())
+			time.Sleep(p.reconnectionBackoff.Next())
 			continue
 		}
 
-		backoff.reset()
+		p.reconnectionBackoff.Reset()
 		p.mu.Lock()
 
 		if p.isPoolClosed() {
@@ -358,20 +409,25 @@ func (p *producerConnectionPool) startConnecting() {
 
 		existing = p.addOrDelete(c, false)
 		p.mu.Unlock()
+		p.logger.Info("Created connection to %s (%d total)", p.address, len(existing))
 	}
 }
 
-func (p *producerConnectionPool) getConnections() connectionSet {
-	value := p.connections.Load()
+func (p *producerConnectionPool) getConnections() []*connection {
+	value := p.connectionsSnapshot.Load()
 	if value == nil {
 		return nil
 	}
-	return value.(connectionSet)
+	return value.([]*connection)
+}
+
+func (p *producerConnectionPool) IsConnected() bool {
+	return len(p.getConnections()) > 0
 }
 
 // Adds or deletes a connection, callers MUST hold the lock
-func (p *producerConnectionPool) addOrDelete(c *connection, deleteConnection bool) connectionSet {
-	existingMap := p.getConnections()
+func (p *producerConnectionPool) addOrDelete(c *connection, deleteConnection bool) []*connection {
+	existingMap := p.connections
 
 	// Shallow copy existing
 	newMap := make(connectionSet, len(existingMap)+1)
@@ -385,6 +441,12 @@ func (p *producerConnectionPool) addOrDelete(c *connection, deleteConnection boo
 		newMap[c] = true
 	}
 
-	p.connections.Store(newMap)
-	return newMap
+	snapshot := make([]*connection, 0, len(newMap))
+	for c := range newMap {
+		snapshot = append(snapshot, c)
+	}
+
+	p.connections = newMap
+	p.connectionsSnapshot.Store(snapshot)
+	return snapshot
 }

@@ -23,11 +23,11 @@ func (c *Connection) Close() error {
 }
 
 func (c *Connection) LocalAddr() net.Addr {
-	return nil
+	return &net.TCPAddr{}
 }
 
 func (c *Connection) RemoteAddr() net.Addr {
-	return nil
+	return &net.TCPAddr{}
 }
 
 func (c *Connection) SetDeadline(t time.Time) error {

@@ -13,14 +13,6 @@ type Topology struct {
 	ConsumerPort       int      `json:"consumerPort"`
 }
 
-func (t *Topology) ProducerUrl(topic string, ordinal int, partitionKey string) string {
-	querystring := ""
-	if partitionKey != "" {
-		querystring = fmt.Sprintf("?partitionKey=%s", partitionKey)
-	}
-	return fmt.Sprintf("http://%s:%d/v1/topic/%s/messages%s", t.hostName(ordinal), t.ProducerPort, topic, querystring)
-}
-
 func (t *Topology) hostName(ordinal int) string {
 	if len(t.BrokerNames) > 0 {
 		return t.BrokerNames[ordinal]

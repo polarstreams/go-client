@@ -1,12 +1,9 @@
 package polar
 
 import (
-	"fmt"
 	"io"
-	"net/http"
 
 	. "github.com/polarstreams/go-client/internal"
-	"github.com/polarstreams/go-client/internal/utils"
 	"github.com/polarstreams/go-client/types"
 )
 
@@ -36,7 +33,10 @@ func NewProducer(serviceUrl string) (Producer, error) {
 
 func fromProducerOptions(o *types.ProducerOptions) *ClientOptions {
 	return &ClientOptions{
-		Logger: o.Logger,
+		Logger:                      o.Logger,
+		ProducerInitialize:          true,
+		ProducerFlushThresholdBytes: o.FlushThresholdBytes,
+		ProducerConnectionsPerHost:  o.ConnectionsPerBroker,
 	}
 }
 
@@ -46,10 +46,6 @@ func fromProducerOptions(o *types.ProducerOptions) *ClientOptions {
 func NewProducerWithOpts(serviceUrl string, options types.ProducerOptions) (Producer, error) {
 	client, err := NewClient(serviceUrl, fromProducerOptions(&options))
 	if err != nil {
-		return nil, err
-	}
-
-	if err := client.Connect(); err != nil {
 		return nil, err
 	}
 
@@ -63,18 +59,7 @@ type producer struct {
 }
 
 func (p *producer) Send(topic string, message io.Reader, partitionKey string) error {
-	resp, err := p.client.ProduceJson(topic, message, partitionKey)
-	if err != nil {
-		return err
-	}
-	body, err := utils.ReadBody(resp)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
-		return nil
-	}
-	return fmt.Errorf(body)
+	return p.client.ProduceJson(topic, message, partitionKey)
 }
 
 func (p *producer) BrokersLength() int {

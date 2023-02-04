@@ -5,6 +5,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+	"io"
+
+	. "github.com/polarstreams/go-client/internal/types"
 )
 
 type OpCode uint8
@@ -14,6 +17,7 @@ type ErrorCode uint8
 
 // The only responses with body are errors, leave 511 for the error message
 const ResponseBodyMaxLength = 512
+const noStreamId = 0xFFFFFFFF
 
 var Endianness = binary.BigEndian
 
@@ -54,14 +58,11 @@ type BinaryHeader struct {
 var HeaderSize = binarySize(BinaryHeader{})
 
 type BinaryRequest interface {
-	Marshal(w *bytes.Buffer) error
+	Marshal(w *bytes.Buffer, header *BinaryHeader) error
+
 	BodyLength() int
 
-	// Sets the stream id in a thread safe manner
-	SetStreamId(id StreamId)
-
-	// Gets the stream id in a thread safe manner
-	StreamId() *StreamId
+	StreamId() StreamId
 }
 
 type BinaryResponse interface {
@@ -122,24 +123,59 @@ func WriteHeader(w *bytes.Buffer, header *BinaryHeader) error {
 	return nil
 }
 
-type ProduceRequest struct {
+func WriteString(w *bytes.Buffer, value string) error {
+	if err := w.WriteByte(byte(len(value))); err != nil {
+		return err
+	}
+	_, err := w.Write([]byte(value))
+	return err
 }
 
-func (r *ProduceRequest) Marshal(w *bytes.Buffer) error {
-	// TODO: IMPLEMENT
-	return nil
+type ProduceRequest struct {
+	topic        string
+	message      FixedLengthReader
+	partitionKey string
+	streamId     StreamId
+}
+
+func NewProduceRequest(streamId StreamId, topic string, message FixedLengthReader, partitionKey string) BinaryRequest {
+	return &ProduceRequest{
+		topic:        topic,
+		message:      message,
+		partitionKey: partitionKey,
+		streamId:     streamId,
+	}
+}
+
+func (r *ProduceRequest) Marshal(w *bytes.Buffer, header *BinaryHeader) error {
+	header.StreamId = r.streamId
+	header.Op = ProduceOp
+	header.BodyLength = uint32(r.BodyLength())
+	if err := WriteHeader(w, header); err != nil {
+		return err
+	}
+	if err := WriteString(w, r.partitionKey); err != nil {
+		return err
+	}
+	if err := WriteString(w, r.topic); err != nil {
+		return err
+	}
+	if err := binary.Write(w, Endianness, uint32(r.message.Len())); err != nil {
+		return err
+	}
+
+	// Reader.WriteTo() should kick in
+	_, err := io.Copy(w, r.message)
+	return err
 }
 
 func (r *ProduceRequest) BodyLength() int {
-	// TODO: IMPLEMENT
-	return 0
+	// optional timestamp μs (int64) | partition key length (uint8) | partition key (bytes)
+	// topic length (uint8)          | topic name (bytes)
+	// message 0 length (uint32)     | message 0 (bytes)
+	return 1 + len(r.partitionKey) + 1 + len(r.topic) + 4 + r.message.Len()
 }
 
-func (r *ProduceRequest) SetStreamId(id StreamId) {
-	// TODO: IMPLEMENT
-}
-
-func (r *ProduceRequest) StreamId() *StreamId {
-	// TODO: IMPLEMENT
-	return nil
+func (r *ProduceRequest) StreamId() StreamId {
+	return r.streamId
 }

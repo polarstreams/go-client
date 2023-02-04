@@ -65,10 +65,6 @@ func NewConsumerWithOpts(serviceUrl string, options ConsumerOptions) (Consumer, 
 		return nil, err
 	}
 
-	if err := client.Connect(); err != nil {
-		return nil, err
-	}
-
 	client.RegisterAsConsumer(options)
 
 	c := &consumer{
