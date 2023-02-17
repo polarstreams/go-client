@@ -167,6 +167,9 @@ func (c *connection) receiveResponses() {
 		}
 
 		handler(response)
+
+		// StreamId can be reused
+		c.streamIds <- header.StreamId
 	}
 
 	c.Close()

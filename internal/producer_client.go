@@ -80,7 +80,6 @@ func (c *producerClient) Topology() *Topology {
 
 func (c *producerClient) IsProducerUp(ordinal int) bool {
 	pool := c.getPool(ordinal)
-	fmt.Println("--Producer client pool for B", ordinal, len(pool.connections))
 	return pool != nil && pool.IsConnected()
 }
 
