@@ -25,7 +25,7 @@ type connection struct {
 	closeOnce         sync.Once
 	handlers          sync.Map
 	streamIds         chan StreamId
-	requests          chan BinaryRequest
+	requests          chan *ProduceRequestPart
 	logger            Logger
 	flushThreshold    int
 }
@@ -60,7 +60,7 @@ func newConnection(address string, h disconnectHandler, flushThreshold int, logg
 		logger:            logger,
 		streamIds:         make(chan StreamId, maxStreamIds),
 		flushThreshold:    flushThreshold,
-		requests:          make(chan BinaryRequest, 128),
+		requests:          make(chan *ProduceRequestPart, 512),
 	}
 
 	// Reserve StreamId(0) for the Startup message
@@ -97,17 +97,12 @@ func (c *connection) Send(topic string, message FixedLengthReader, partitionKey 
 		}
 	}()
 
-	streamId := <-c.streamIds
-	req := producer.NewProduceRequest(streamId, topic, message, partitionKey)
-	response := make(chan BinaryResponse, 1)
-	c.handlers.Store(streamId, func(r BinaryResponse) {
-		response <- r
-	})
+	reqPart := producer.NewProduceRequestPart(topic, message, partitionKey)
 
 	// Append the request, it might panic when requests channel is closed
-	c.requests <- req
+	c.requests <- reqPart
 	// Wait for the response
-	resp = <-response
+	resp = <-reqPart.Response
 	return resp
 }
 
@@ -118,6 +113,13 @@ func (c *connection) Close() {
 		_ = c.conn.Close()
 		c.disconnectHandler.OnConnectionClose(c)
 	})
+
+	notSentErr := NewClientErrorResponse("Request could not be sent: connection closed")
+
+	// Dequeue remaining request parts
+	for p := range c.requests {
+		p.Response <- notSentErr
+	}
 
 	toDelete := make([]StreamId, 0)
 	c.handlers.Range(func(key, value interface{}) bool {
@@ -131,7 +133,7 @@ func (c *connection) Close() {
 			continue
 		}
 		handler := h.(func(BinaryResponse))
-		handler(NewClientErrorResponse("Request could not be sent: connection closed"))
+		handler(notSentErr)
 	}
 }
 
@@ -184,21 +186,19 @@ func (c *connection) getHandler(id StreamId) streamHandler {
 	return h.(func(BinaryResponse))
 }
 
-func totalRequestSize(r BinaryRequest) int {
-	return r.BodyLength() + HeaderSize
-}
-
 func (c *connection) sendRequests() {
 	w := bytes.NewBuffer(make([]byte, c.flushThreshold))
 	header := &BinaryHeader{Version: 1, Flags: 0} // Reuse allocation
 
 	shouldExit := false
-	var item BinaryRequest
-	var group []BinaryRequest
+	var item *ProduceRequestPart
+	var group [][]*ProduceRequestPart
+	handledGroupIndex := -1
 	for !shouldExit {
 		w.Reset()
+		handledGroupIndex = 0
 		groupSize := 0
-		group = make([]BinaryRequest, 0)
+		group = make([][]*ProduceRequestPart, 0)
 		canAddNext := true
 
 		if item == nil {
@@ -210,33 +210,44 @@ func (c *connection) sendRequests() {
 			}
 		}
 
-		group = append(group, item)
-		groupSize += totalRequestSize(item)
+		group = appendToGroup(group, item)
+		groupSize += item.Message.Len()
 		item = nil
 
 		// Coalesce requests w/ Nagle disabled
 		for canAddNext && !shouldExit {
 			select {
-			case request, ok := <-c.requests:
+			case reqPart, ok := <-c.requests:
 				if !ok {
 					shouldExit = true
 					break
 				}
-				requestSize := totalRequestSize(request)
-				if groupSize+requestSize > c.flushThreshold {
+				partSize := reqPart.Message.Len()
+				if groupSize+partSize >= c.flushThreshold {
 					canAddNext = false
-					item = request
+					item = reqPart
 					break
 				}
-				group = append(group, request)
-				groupSize += requestSize
+				group = appendToGroup(group, reqPart)
+				groupSize += partSize
 
 			default:
 				canAddNext = false
 			}
 		}
 
-		for _, request := range group {
+		for i, parts := range group {
+			handledGroupIndex = i
+			streamId := <-c.streamIds
+			request := NewProduceRequest(streamId, parts)
+			// Capture only the channels
+			channels := request.ResponseChannels()
+			c.handlers.Store(streamId, func(r BinaryResponse) {
+				for _, responseChan := range channels {
+					responseChan <- r
+				}
+			})
+
 			if err := request.Marshal(w, header); err != nil {
 				c.logger.Error("Error marshaling a request, closing connection: %s", err)
 				shouldExit = true
@@ -247,19 +258,38 @@ func (c *connection) sendRequests() {
 		if w.Len() > 0 {
 			if _, err := c.conn.Write(w.Bytes()); err != nil {
 				c.logger.Warn("There was an error while writing to a producer server, closing connection: %s", err)
+				shouldExit = true
 				break
 			}
 		}
 	}
 
 	// Close in-flight group
-	for _, request := range group {
-		streamId := request.StreamId()
-		handler := c.getHandler(streamId)
-		handler(NewClientErrorResponse("Error while sending request"))
+	for i := handledGroupIndex + 1; i < len(group); i++ {
+		parts := group[i]
+		for _, p := range parts {
+			p.Response <- NewClientErrorResponse("Error while sending request")
+		}
 	}
 
 	c.Close()
+}
+
+// TODO: TEST INDEPENDENTLY
+func appendToGroup(group [][]*ProduceRequestPart, part *ProduceRequestPart) [][]*ProduceRequestPart {
+	// This could benefit from a linked list
+	length := len(group)
+	if length == 0 {
+		return append(group, []*ProduceRequestPart{part})
+	}
+
+	// Check the last element
+	lastPart := group[length-1][0]
+	if lastPart.Topic == part.Topic && lastPart.PartitionKey == part.PartitionKey {
+		group[length-1] = append(group[length-1], part)
+		return group
+	}
+	return append(group, []*ProduceRequestPart{part})
 }
 
 type connectionSet map[*connection]bool

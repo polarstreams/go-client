@@ -60,7 +60,7 @@ var HeaderSize = binarySize(BinaryHeader{})
 type BinaryRequest interface {
 	Marshal(w *bytes.Buffer, header *BinaryHeader) error
 
-	BodyLength() int
+	ResponseChannels() []chan<- BinaryResponse
 
 	StreamId() StreamId
 }
@@ -131,49 +131,87 @@ func WriteString(w *bytes.Buffer, value string) error {
 	return err
 }
 
-type ProduceRequest struct {
-	topic        string
-	message      FixedLengthReader
-	partitionKey string
-	streamId     StreamId
+// Represents a part of a potential produce request
+type ProduceRequestPart struct {
+	Topic        string
+	Message      FixedLengthReader
+	PartitionKey string
+	Response     chan BinaryResponse
 }
 
-func NewProduceRequest(streamId StreamId, topic string, message FixedLengthReader, partitionKey string) BinaryRequest {
+func NewProduceRequestPart(
+	topic string,
+	message FixedLengthReader,
+	partitionKey string,
+) *ProduceRequestPart {
+	return &ProduceRequestPart{
+		Topic:        topic,
+		Message:      message,
+		PartitionKey: partitionKey,
+		Response:     make(chan BinaryResponse, 1),
+	}
+}
+
+type ProduceRequest struct {
+	streamId StreamId
+	parts    []*ProduceRequestPart
+}
+
+func NewProduceRequest(streamId StreamId, parts []*ProduceRequestPart) BinaryRequest {
 	return &ProduceRequest{
-		topic:        topic,
-		message:      message,
-		partitionKey: partitionKey,
-		streamId:     streamId,
+		streamId: streamId,
+		parts:    parts,
 	}
 }
 
 func (r *ProduceRequest) Marshal(w *bytes.Buffer, header *BinaryHeader) error {
 	header.StreamId = r.streamId
 	header.Op = ProduceOp
-	header.BodyLength = uint32(r.BodyLength())
+
+	firstPart := r.parts[0]
+	header.BodyLength = uint32(r.bodyLength())
 	if err := WriteHeader(w, header); err != nil {
 		return err
 	}
-	if err := WriteString(w, r.partitionKey); err != nil {
+	if err := WriteString(w, firstPart.PartitionKey); err != nil {
 		return err
 	}
-	if err := WriteString(w, r.topic); err != nil {
-		return err
-	}
-	if err := binary.Write(w, Endianness, uint32(r.message.Len())); err != nil {
+	if err := WriteString(w, firstPart.Topic); err != nil {
 		return err
 	}
 
-	// Reader.WriteTo() should kick in
-	_, err := io.Copy(w, r.message)
-	return err
+	for _, part := range r.parts {
+		if err := binary.Write(w, Endianness, uint32(part.Message.Len())); err != nil {
+			return err
+		}
+
+		// Reader.WriteTo() should kick in
+		if _, err := io.Copy(w, part.Message); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (r *ProduceRequest) BodyLength() int {
+func (r *ProduceRequest) bodyLength() int {
 	// optional timestamp μs (int64) | partition key length (uint8) | partition key (bytes)
 	// topic length (uint8)          | topic name (bytes)
 	// message 0 length (uint32)     | message 0 (bytes)
-	return 1 + len(r.partitionKey) + 1 + len(r.topic) + 4 + r.message.Len()
+
+	firstPart := r.parts[0]
+	total := 1 + len(firstPart.PartitionKey) + 1 + len(firstPart.Topic)
+	for _, p := range r.parts {
+		total += 4 + p.Message.Len()
+	}
+	return total
+}
+
+func (r *ProduceRequest) ResponseChannels() []chan<- BinaryResponse {
+	channels := make([]chan<- BinaryResponse, len(r.parts))
+	for i := 0; i < len(r.parts); i++ {
+		channels[i] = r.parts[i].Response
+	}
+	return channels
 }
 
 func (r *ProduceRequest) StreamId() StreamId {

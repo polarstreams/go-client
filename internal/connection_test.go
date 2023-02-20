@@ -17,7 +17,7 @@ var _ = Describe("connection", func() {
 		It("should recover from closed request channel", func() {
 			c := &connection{
 				streamIds: make(chan StreamId, 10),
-				requests:  make(chan BinaryRequest, 10),
+				requests:  make(chan *ProduceRequestPart, 10),
 				logger:    StdLogger,
 			}
 
@@ -29,10 +29,10 @@ var _ = Describe("connection", func() {
 			Expect(resp).To(Equal(NewClientErrorResponse("Request could not be sent: connection closed")))
 		})
 
-		It("should return when handler is invoked", func() {
+		It("should return when channel has data", func() {
 			c := &connection{
 				streamIds: make(chan StreamId, 10),
-				requests:  make(chan BinaryRequest, 10),
+				requests:  make(chan *ProduceRequestPart, 10),
 				logger:    StdLogger,
 			}
 
@@ -46,8 +46,9 @@ var _ = Describe("connection", func() {
 				r <- c.Send("topic1", bytes.NewReader([]byte("abc")), "key1")
 			}()
 			wg.Wait()
-			handler := c.getHandler(0)
-			handler(NewEmptyResponse(ProduceResponseOp))
+
+			part := <-c.requests
+			part.Response <- NewEmptyResponse(ProduceResponseOp)
 
 			select {
 			case resp := <-r:
@@ -62,7 +63,7 @@ var _ = Describe("connection", func() {
 		It("should invoke pending handlers", func() {
 			c := &connection{
 				streamIds:         make(chan StreamId, 10),
-				requests:          make(chan BinaryRequest, 10),
+				requests:          make(chan *ProduceRequestPart, 10),
 				logger:            StdLogger,
 				conn:              &fakes.Connection{},
 				disconnectHandler: &fakeDisconnectHandler{},
