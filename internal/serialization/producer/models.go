@@ -148,7 +148,7 @@ func NewProduceRequestPart(
 		Topic:        topic,
 		Message:      message,
 		PartitionKey: partitionKey,
-		Response:     make(chan BinaryResponse, 1),
+		Response:     make(chan BinaryResponse, 2),
 	}
 }
 
@@ -197,6 +197,7 @@ func (r *ProduceRequest) bodyLength() int {
 	// optional timestamp μs (int64) | partition key length (uint8) | partition key (bytes)
 	// topic length (uint8)          | topic name (bytes)
 	// message 0 length (uint32)     | message 0 (bytes)
+	// message n length (uint32)     | message n (bytes)
 
 	firstPart := r.parts[0]
 	total := 1 + len(firstPart.PartitionKey) + 1 + len(firstPart.Topic)

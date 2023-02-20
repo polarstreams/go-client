@@ -68,13 +68,15 @@ func newConnection(address string, h disconnectHandler, flushThreshold int, logg
 		c.streamIds <- i
 	}
 
-	go c.receiveResponses()
-
 	response := make(chan BinaryResponse, 1)
 	c.handlers.Store(StreamId(0), func(r BinaryResponse) {
 		response <- r
 	})
 
+	// Start receiving
+	go c.receiveResponses()
+
+	// Wait for the startup response
 	r := <-response
 	if r.Op() != ReadyOp {
 		_ = conn.Close()
@@ -149,7 +151,7 @@ func (c *connection) receiveResponses() {
 			break
 		}
 
-		handler := c.getHandler(header.StreamId)
+		handler := c.getHandler(header)
 		var response BinaryResponse
 		if header.BodyLength == 0 {
 			response = NewEmptyResponse(header.Op)
@@ -178,10 +180,10 @@ func (c *connection) receiveResponses() {
 }
 
 // Gets and deletes the handler from the pending handlers
-func (c *connection) getHandler(id StreamId) streamHandler {
-	h, loaded := c.handlers.LoadAndDelete(id)
+func (c *connection) getHandler(header *BinaryHeader) streamHandler {
+	h, loaded := c.handlers.LoadAndDelete(header.StreamId)
 	if !loaded {
-		panic(fmt.Sprintf("No handler for stream id %d", id))
+		panic(fmt.Sprintf("No handler for stream id %d (v %d, op %d)", header.StreamId, header.Version, header.Op))
 	}
 	return h.(func(BinaryResponse))
 }
