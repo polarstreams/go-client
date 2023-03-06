@@ -95,6 +95,33 @@ var _ = Describe("connection", func() {
 			}
 		})
 	})
+
+	Describe("appendToGroup", func() {
+		It("should append to last group", func() {
+			part1 := NewProduceRequestPart("t1", nil, "k1")
+			part2 := NewProduceRequestPart("t1", nil, "k1")
+			part3 := NewProduceRequestPart("t1", nil, "k1")
+			part4 := NewProduceRequestPart("t2", nil, "k1")
+			part5 := NewProduceRequestPart("t1", nil, "k2")
+			part6 := NewProduceRequestPart("t1", nil, "")
+			part7 := NewProduceRequestPart("t1", nil, "")
+
+			group := appendToGroup([][]*ProduceRequestPart{}, part1)
+			group = appendToGroup(group, part2)
+			group = appendToGroup(group, part3)
+			Expect(group).To(HaveLen(1))
+			Expect(group[0]).To(HaveLen(3))
+			group = appendToGroup(group, part4)
+			Expect(group).To(HaveLen(2))
+			Expect(group[1]).To(HaveLen(1))
+			group = appendToGroup(group, part5)
+			Expect(group).To(HaveLen(3))
+			group = appendToGroup(group, part6)
+			group = appendToGroup(group, part7)
+			Expect(group).To(HaveLen(4))
+			Expect(group[3]).To(HaveLen(2))
+		})
+	})
 })
 
 type fakeDisconnectHandler struct{}

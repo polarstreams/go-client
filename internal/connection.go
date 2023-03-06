@@ -277,7 +277,6 @@ func (c *connection) sendRequests() {
 	c.Close()
 }
 
-// TODO: TEST INDEPENDENTLY
 func appendToGroup(group [][]*ProduceRequestPart, part *ProduceRequestPart) [][]*ProduceRequestPart {
 	// This could benefit from a linked list
 	length := len(group)
