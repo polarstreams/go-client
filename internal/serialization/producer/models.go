@@ -160,6 +160,25 @@ func (r *ProduceRequest) Marshal(w *bytes.Buffer, header *BinaryHeader) error {
 	if err := WriteString(w, r.topic); err != nil {
 		return err
 	}
+
+	// TODO: REMOVE THIS TEST
+	if r.message.Len() >= 32 * 1024 {
+		// Cut it into 1 KiB messages
+		for r.message.Len() > 0 {
+			itemLength := 1024
+			if r.message.Len() < itemLength {
+				itemLength = r.message.Len()
+			}
+			if err := binary.Write(w, Endianness, uint32(itemLength)); err != nil {
+				return err
+			}
+			if _, err := io.CopyN(w, r.message, int64(itemLength)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	if err := binary.Write(w, Endianness, uint32(r.message.Len())); err != nil {
 		return err
 	}
@@ -174,7 +193,20 @@ func (r *ProduceRequest) BodyLength() int {
 	// topic length (uint8)          | topic name (bytes)
 	// message 0 length (uint32)     | message 0 (bytes)
 	// message n length (uint32)     | message n (bytes)
-	return 1 + len(r.partitionKey) + 1 + len(r.topic) + 4 + r.message.Len()
+	length := 1 + len(r.partitionKey) + 1 + len(r.topic)
+
+	// TODO: REMOVE THIS TEST
+	if r.message.Len() < 32*1024 {
+		length += 4 + r.message.Len()
+	} else {
+		length += r.message.Len()
+		length += 4 * r.message.Len() / 1024
+		if r.message.Len() % 1024 > 0 {
+			length += 4
+		}
+	}
+
+	return length
 }
 
 func (r *ProduceRequest) StreamId() StreamId {
