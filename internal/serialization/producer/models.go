@@ -173,6 +173,7 @@ func (r *ProduceRequest) BodyLength() int {
 	// optional timestamp μs (int64) | partition key length (uint8) | partition key (bytes)
 	// topic length (uint8)          | topic name (bytes)
 	// message 0 length (uint32)     | message 0 (bytes)
+	// message n length (uint32)     | message n (bytes)
 	return 1 + len(r.partitionKey) + 1 + len(r.topic) + 4 + r.message.Len()
 }
 

@@ -63,18 +63,21 @@ func newConnection(address string, h disconnectHandler, flushThreshold int, logg
 		requests:          make(chan BinaryRequest, 128),
 	}
 
-	// Reserve StreamId(0) for the Startup message
+	response := make(chan BinaryResponse, 1)
+
 	for i := StreamId(1); i < maxStreamIds; i++ {
 		c.streamIds <- i
 	}
 
-	go c.receiveResponses()
-
-	response := make(chan BinaryResponse, 1)
+	// Use StreamId(0) for the Startup message
 	c.handlers.Store(StreamId(0), func(r BinaryResponse) {
 		response <- r
 	})
 
+	// Start receiving
+	go c.receiveResponses()
+
+	// Wait for the startup response
 	r := <-response
 	if r.Op() != ReadyOp {
 		_ = conn.Close()
@@ -118,6 +121,8 @@ func (c *connection) Close() {
 		_ = c.conn.Close()
 		c.disconnectHandler.OnConnectionClose(c)
 	})
+
+	// TODO: Dequeue remaining requests
 
 	toDelete := make([]StreamId, 0)
 	c.handlers.Range(func(key, value interface{}) bool {

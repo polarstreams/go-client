@@ -272,8 +272,6 @@ var _ = Describe("Client", func() {
 					shutdown0()
 					time.Sleep(additionalTestDelay)
 
-					fmt.Println("--Shutdown B0")
-
 					produceJson(client, `{"key0": "value0_1"}`, partitionKeyT0Range)
 					Expect(drainChan(c1)).To(Equal([]produceRequest{{
 						topic:        topicName,
@@ -285,10 +283,8 @@ var _ = Describe("Client", func() {
 					Expect(client.isProducerUp(1)).To(BeTrue())
 					Expect(client.isProducerUp(2)).To(BeTrue())
 
-					fmt.Println("--Creating server")
 					shutdown0, c0 = NewProducerServerWithChannel("127.0.0.1:8093")
 					time.Sleep(reconnectionDelay + additionalTestDelay)
-					fmt.Println("--Checking back online")
 					Expect(client.isProducerUp(0)).To(BeTrue())
 
 					produceJson(client, `{"key0": "value0_2"}`, partitionKeyT0Range)
