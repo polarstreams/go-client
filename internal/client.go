@@ -635,6 +635,6 @@ func setDefaultOptions(options *ClientOptions) {
 		options.ProducerConnectionsPerHost = 1
 	}
 	if options.ProducerFlushThresholdBytes == 0 {
-		options.ProducerFlushThresholdBytes = 16 * 1024
+		options.ProducerFlushThresholdBytes = 64 * 1024
 	}
 }
