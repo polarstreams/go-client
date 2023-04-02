@@ -216,7 +216,9 @@ func (c *connection) sendRequests() {
 		groupSize += item.Message.Len()
 		item = nil
 
-		// Coalesce requests w/ Nagle disabled
+		// Coalesce waiting for new data for a brief period
+		timeout := time.After(500 * time.Microsecond)
+
 		for canAddNext && !shouldExit {
 			select {
 			case reqPart, ok := <-c.requests:
@@ -232,8 +234,7 @@ func (c *connection) sendRequests() {
 				}
 				group = appendToGroup(group, reqPart)
 				groupSize += partSize
-
-			default:
+			case <-timeout:
 				canAddNext = false
 			}
 		}
