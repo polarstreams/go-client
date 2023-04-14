@@ -54,6 +54,24 @@ var _ = Describe("Producer", func ()  {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(producer.BrokersLength()).To(Equal(expectedBrokers))
 	})
+
+	It("should send multiple requests in parallel", func ()  {
+		producer := newTestProducer(fmt.Sprintf("polar://%s", host))
+		defer producer.Close()
+
+		const total = 64
+		responses := make(chan error, total)
+
+		for i := 0; i < total; i++ {
+			go func(v int) {
+				responses <- producer.Send(topic, strings.NewReader(fmt.Sprintf(`{"hello": %03d}`, v)), partitionKeyT0Range)
+			}(i)
+		}
+
+		for i := 0; i < total; i++ {
+			Expect(<-responses).NotTo(HaveOccurred())
+		}
+	})
 })
 
 func newTestProducer(serviceUrl string) Producer {

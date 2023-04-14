@@ -79,7 +79,14 @@ type ConsumerOptions struct {
 
 // Represents the additional options to set when creating a Producer.
 type ProducerOptions struct {
+	// The logger for the producer to output internal log messages
 	Logger Logger
+
+	// The amount of bytes to coalesce internally before flushing the frames to the TCP connection (defaults to 16 KiB)
+	FlushThresholdBytes int
+
+	// The amount of persistent connections to maintain per broker (defaults to 1)
+	ConnectionsPerBroker int
 }
 
 // An error that includes the origin of the error

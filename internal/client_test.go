@@ -1,11 +1,13 @@
 package internal
 
 import (
-	"context"
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,9 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/polarstreams/go-client/types"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/polarstreams/go-client/internal/serialization/producer"
+	"github.com/polarstreams/go-client/types"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
@@ -25,6 +28,7 @@ const (
 	partitionKeyT1Range = "567"
 	partitionKeyT2Range = "234"
 )
+const topicName = "abc"
 
 const reconnectionDelay = 20 * time.Millisecond
 const additionalTestDelay = 500 * time.Millisecond
@@ -38,12 +42,6 @@ var _ = Describe("Client", func() {
 	// Note that on macos you need to manually create the alias for the loopback addresses, for example
 	// for i in {2..3}; do sudo ifconfig lo0 alias 127.0.0.$i up; done
 	Describe("NewClient()", func() {
-		It("should parse the url and set the http client", func() {
-			client, err := NewClient("polar://my-host:1234/", nil)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(client.discoveryUrl).To(Equal("http://my-host:1234/v1/brokers"))
-		})
-
 		It("should return an error when service url is invalid", func() {
 			_, err := NewClient("zzz://my-host:1234/", nil)
 			Expect(err).To(HaveOccurred())
@@ -63,10 +61,11 @@ var _ = Describe("Client", func() {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				topology := Topology{
-					BaseName:     baseName,
-					Length:       10 + int(atomic.AddInt64(&counter, 1)),
-					ProducerPort: 8091,
-					ConsumerPort: 8092,
+					BaseName:           baseName,
+					Length:             10 + int(atomic.AddInt64(&counter, 1)),
+					ProducerPort:       8091,
+					ConsumerPort:       8092,
+					ProducerBinaryPort: 8093,
 				}
 				Expect(json.NewEncoder(w).Encode(topology)).NotTo(HaveOccurred())
 			}))
@@ -84,13 +83,13 @@ var _ = Describe("Client", func() {
 		It("should retrieve and store the topology", func() {
 			client, err := NewClient(fmt.Sprintf("polar://%s", discoveryAddress), nil)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(client.Connect()).NotTo(HaveOccurred())
 			defer client.Close()
 			Expect(client.Topology()).To(Equal(&Topology{
-				BaseName:     baseName,
-				Length:       11,
-				ProducerPort: 8091,
-				ConsumerPort: 8092,
+				BaseName:           baseName,
+				Length:             11,
+				ProducerPort:       8091,
+				ConsumerPort:       8092,
+				ProducerBinaryPort: 8093,
 			}))
 		})
 
@@ -99,7 +98,6 @@ var _ = Describe("Client", func() {
 			client, err := NewClient(fmt.Sprintf("polar://%s", discoveryAddress), nil)
 			Expect(err).NotTo(HaveOccurred())
 			client.topologyPollInterval = pollInterval
-			Expect(client.Connect()).NotTo(HaveOccurred())
 			defer client.Close()
 			time.Sleep(pollInterval * 4)
 			Expect(client.Topology().BaseName).To(Equal(baseName))
@@ -110,41 +108,41 @@ var _ = Describe("Client", func() {
 	Context("With a healthy cluster", func() {
 		Describe("ProduceJson()", func() {
 			var discoveryServer *httptest.Server
-			var s0, s1, s2 *http.Server
-			var c0, c1, c2 chan string
+			var shutdown0, shutdown1, shutdown2 func()
+			var c0, c1, c2 chan produceRequest
 			topology := newTestTopology()
 			discoveryAddress := ""
 
 			BeforeEach(func() {
 				discoveryServer = NewDiscoveryServer(topology)
 				discoveryAddress = discoveryServer.URL[7:] // Remove http://
-				s0, c0 = NewProducerServerWithChannel("127.0.0.1:8091")
-				s1, c1 = NewProducerServerWithChannel("127.0.0.2:8091")
-				s2, c2 = NewProducerServerWithChannel("127.0.0.3:8091")
+				shutdown0, c0 = NewProducerServerWithChannel("127.0.0.1:8093")
+				shutdown1, c1 = NewProducerServerWithChannel("127.0.0.2:8093")
+				shutdown2, c2 = NewProducerServerWithChannel("127.0.0.3:8093")
 			})
 
 			AfterEach(func() {
 				discoveryServer.Close()
-				s0.Shutdown(context.Background())
-				s1.Shutdown(context.Background())
-				s2.Shutdown(context.Background())
+				shutdown0()
+				shutdown1()
+				shutdown2()
 			})
 
 			It("should send a request to each host in round robin", func() {
-				client := newTestClient(discoveryAddress)
+				client := newTestClient(discoveryAddress, true)
 				defer client.Close()
 
 				produceJson(client, `{"key0": "value0"}`, "")
 				produceJson(client, `{"key1": "value1"}`, "")
 				produceJson(client, `{"key2": "value2"}`, "")
 
-				Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0"}`}))
-				Expect(drainChan(c1)).To(Equal([]string{`{"key1": "value1"}`}))
-				Expect(drainChan(c2)).To(Equal([]string{`{"key2": "value2"}`}))
+				Expect(drainChan(c0)).To(Equal([]produceRequest{{topic: topicName, message: `{"key0": "value0"}`}}))
+				Expect(drainChan(c1)).To(Equal([]produceRequest{{topic: topicName, message: `{"key1": "value1"}`}}))
+				Expect(drainChan(c2)).To(Equal([]produceRequest{{topic: topicName, message: `{"key2": "value2"}`}}))
 			})
 
 			It("should send a request to each host according to the partition key", func() {
-				client := newTestClient(discoveryAddress)
+				client := newTestClient(discoveryAddress, true)
 				defer client.Close()
 
 				produceJson(client, `{"key0": "value0_0"}`, partitionKeyT0Range)
@@ -153,9 +151,29 @@ var _ = Describe("Client", func() {
 				produceJson(client, `{"key2": "value2"}`, partitionKeyT2Range)
 				produceJson(client, `{"key1": "value1"}`, partitionKeyT1Range)
 
-				Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0_0"}`, `{"key0": "value0_1"}`, `{"key0": "value0_2"}`}))
-				Expect(drainChan(c1)).To(Equal([]string{`{"key1": "value1"}`}))
-				Expect(drainChan(c2)).To(Equal([]string{`{"key2": "value2"}`}))
+				Expect(drainChan(c0)).To(Equal([]produceRequest{{
+					topic:        topicName,
+					message:      `{"key0": "value0_0"}`,
+					partitionKey: partitionKeyT0Range,
+				}, {
+					topic:        topicName,
+					message:      `{"key0": "value0_1"}`,
+					partitionKey: partitionKeyT0Range,
+				}, {
+					topic:        topicName,
+					message:      `{"key0": "value0_2"}`,
+					partitionKey: partitionKeyT0Range,
+				}}))
+				Expect(drainChan(c1)).To(Equal([]produceRequest{{
+					topic:        topicName,
+					message:      `{"key1": "value1"}`,
+					partitionKey: partitionKeyT1Range,
+				}}))
+				Expect(drainChan(c2)).To(Equal([]produceRequest{{
+					topic:        topicName,
+					message:      `{"key2": "value2"}`,
+					partitionKey: partitionKeyT2Range,
+				}}))
 			})
 		})
 	})
@@ -165,86 +183,116 @@ var _ = Describe("Client", func() {
 
 			Context("With a partial online cluster", func() {
 				var discoveryServer *httptest.Server
-				var s0, s1, s2 *http.Server
-				var c0, c1, c2 chan string
+				var shutdown0, shutdown1, shutdown2 func()
+				var c0, c1, c2 chan produceRequest
 				topology := Topology{
-					Length:       3,
-					BrokerNames:  []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"},
-					ProducerPort: 8091,
-					ConsumerPort: 8092,
+					Length:             3,
+					BrokerNames:        []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"},
+					ProducerPort:       8091,
+					ConsumerPort:       8092,
+					ProducerBinaryPort: 8093,
 				}
 				discoveryAddress := ""
 
 				BeforeEach(func() {
 					discoveryServer = NewDiscoveryServer(topology)
 					discoveryAddress = discoveryServer.URL[7:] // Remove http://
-					s1, c1 = NewProducerServerWithChannel("127.0.0.2:8091")
-					s2, c2 = NewProducerServerWithChannel("127.0.0.3:8091")
+					shutdown1, c1 = NewProducerServerWithChannel("127.0.0.2:8093")
+					shutdown2, c2 = NewProducerServerWithChannel("127.0.0.3:8093")
 				})
 
 				AfterEach(func() {
 					discoveryServer.Close()
-					s1.Shutdown(context.Background())
-					s2.Shutdown(context.Background())
-					if s0 != nil {
-						s0.Shutdown(context.Background())
+					shutdown1()
+					shutdown2()
+					if shutdown0 != nil {
+						shutdown0()
 					}
 				})
 
 				It("should route request according to the partition key or use the next host", func() {
-					client := newTestClient(discoveryAddress)
+					client := newTestClient(discoveryAddress, true)
 					defer client.Close()
 
 					// Host 0 is offline
 					produceJson(client, `{"key0": "value0_0"}`, partitionKeyT0Range)
 					produceJson(client, `{"key1": "value1"}`, partitionKeyT1Range)
 
-					Expect(drainChan(c0)).To(Equal([]string{}))
+					Expect(drainChan(c0)).To(Equal([]produceRequest{}))
 					// The first message was rerouted to B1
-					Expect(drainChan(c1)).To(Equal([]string{`{"key0": "value0_0"}`, `{"key1": "value1"}`}))
-					Expect(drainChan(c2)).To(Equal([]string{}))
-					t := client.Topology()
-					Expect(client.isProducerUp(0, t)).To(BeFalse())
-					Expect(client.isProducerUp(1, t)).To(BeTrue())
-					Expect(client.isProducerUp(2, t)).To(BeTrue())
+					Expect(drainChan(c1)).To(Equal([]produceRequest{{
+						topic:        topicName,
+						message:      `{"key0": "value0_0"}`,
+						partitionKey: partitionKeyT0Range,
+					}, {
+						topic:        topicName,
+						message:      `{"key1": "value1"}`,
+						partitionKey: partitionKeyT1Range,
+					}}))
+					Expect(drainChan(c2)).To(Equal([]produceRequest{}))
+					Expect(client.isProducerUp(0)).To(BeFalse())
+					Expect(client.isProducerUp(1)).To(BeTrue())
+					Expect(client.isProducerUp(2)).To(BeTrue())
 
 					time.Sleep(reconnectionDelay * 2)
-					s0, c0 = NewProducerServerWithChannel("127.0.0.1:8091")
+					shutdown0, c0 = NewProducerServerWithChannel("127.0.0.1:8093")
 					time.Sleep(reconnectionDelay + additionalTestDelay)
-					Expect(client.isProducerUp(0, t)).To(BeTrue())
+					Expect(client.isProducerUp(0)).To(BeTrue())
 
 					produceJson(client, `{"key0": "value0_1"}`, partitionKeyT0Range)
-					Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0_1"}`}))
+					Expect(drainChan(c0)).To(Equal([]produceRequest{{
+						topic:        topicName,
+						message:      `{"key0": "value0_1"}`,
+						partitionKey: partitionKeyT0Range,
+					}}))
 				})
 
 				It("should reconnect after successful initial connection", func() {
-					s0, c0 = NewProducerServerWithChannel("127.0.0.1:8091")
-					client := newTestClient(discoveryAddress)
+					shutdown0, c0 = NewProducerServerWithChannel("127.0.0.1:8093")
+					client := newTestClient(discoveryAddress, true)
 					defer client.Close()
 
-					// Host 0 is offline
+					// Host 0 is online
 					produceJson(client, `{"key0": "value0_0"}`, partitionKeyT0Range)
 					produceJson(client, `{"key1": "value1"}`, partitionKeyT1Range)
 
-					Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0_0"}`}))
-					Expect(drainChan(c1)).To(Equal([]string{`{"key1": "value1"}`}))
-					Expect(drainChan(c2)).To(Equal([]string{}))
+					Expect(drainChan(c0)).To(Equal([]produceRequest{{
+						topic:        topicName,
+						message:      `{"key0": "value0_0"}`,
+						partitionKey: partitionKeyT0Range,
+					}}))
+					Expect(drainChan(c1)).To(Equal([]produceRequest{{
+						topic:        topicName,
+						message:      `{"key1": "value1"}`,
+						partitionKey: partitionKeyT1Range,
+					}}))
+					Expect(drainChan(c2)).To(Equal([]produceRequest{}))
 
-					s0.Shutdown(context.Background())
+					// Shutdown B0
+					shutdown0()
+					time.Sleep(additionalTestDelay)
+
 					produceJson(client, `{"key0": "value0_1"}`, partitionKeyT0Range)
-					Expect(drainChan(c1)).To(Equal([]string{`{"key0": "value0_1"}`}))
+					Expect(drainChan(c1)).To(Equal([]produceRequest{{
+						topic:        topicName,
+						message:      `{"key0": "value0_1"}`,
+						partitionKey: partitionKeyT0Range,
+					}}))
 
-					t := client.Topology()
-					Expect(client.isProducerUp(0, t)).To(BeFalse())
-					Expect(client.isProducerUp(1, t)).To(BeTrue())
-					Expect(client.isProducerUp(2, t)).To(BeTrue())
+					Expect(client.isProducerUp(0)).To(BeFalse())
+					Expect(client.isProducerUp(1)).To(BeTrue())
+					Expect(client.isProducerUp(2)).To(BeTrue())
 
-					s0, c0 = NewProducerServerWithChannel("127.0.0.1:8091")
+					shutdown0, c0 = NewProducerServerWithChannel("127.0.0.1:8093")
 					time.Sleep(reconnectionDelay + additionalTestDelay)
-					Expect(client.isProducerUp(0, t)).To(BeTrue())
+					Expect(client.isProducerUp(0)).To(BeTrue())
 
-					produceJson(client, `{"key0": "value0_1"}`, partitionKeyT0Range)
-					Expect(drainChan(c0)).To(Equal([]string{`{"key0": "value0_1"}`}))
+					produceJson(client, `{"key0": "value0_2"}`, partitionKeyT0Range)
+					Expect(drainChan(c0)).To(Equal([]produceRequest{{
+						topic:        topicName,
+						message:      `{"key0": "value0_2"}`,
+						partitionKey: partitionKeyT0Range,
+					}}))
 				})
 			})
 		})
@@ -267,20 +315,136 @@ func NewTestServer(address string, handler http.Handler) *http.Server {
 	return server
 }
 
-func NewProducerServerWithChannel(address string) (*http.Server, chan string) {
-	c := make(chan string, 100)
-	server := NewTestServer(address, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte("OK"))
-		if r.URL.Path == "/status" {
-			log.Printf("Broker with address %s received status request", address)
-			return
-		}
-		body := reqBody(r)
-		c <- body
-	}))
+func NewProducerServerWithChannel(address string) (func(), chan produceRequest) {
+	requests := make(chan produceRequest, 100)
+	l, err := net.Listen("tcp", address)
+	Expect(err).NotTo(HaveOccurred())
+	go func() {
+		connections := make([]net.Conn, 0)
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				log.Printf("Server at %s stopped accepting connections", address)
+				break
+			}
 
-	return server, c
+			connections = append(connections, conn)
+			handleProducerConnection(conn, requests)
+		}
+
+		for _, c := range connections {
+			_ = c.Close()
+		}
+	}()
+
+	closeHandler := func() {
+		_ = l.Close()
+	}
+
+	return closeHandler, requests
+}
+
+func handleProducerConnection(conn net.Conn, requests chan produceRequest) {
+	responses := make(chan []byte, 100)
+	go receiveRequests(conn, requests, responses)
+	go sendResponses(conn, responses)
+}
+
+func receiveRequests(conn net.Conn, requests chan produceRequest, responses chan []byte) {
+	// First request must be a Startup message
+	initialized := false
+	header := &producer.BinaryHeader{}
+
+	for {
+		err := binary.Read(conn, producer.Endianness, header)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("Reading header from client failed: %s", err)
+			}
+			break
+		}
+
+		if !initialized {
+			if header.Op == producer.StartupOp && header.StreamId == 0 && header.BodyLength == 0 {
+				initialized = true
+				responses <- createResponse(header, producer.ReadyOp)
+				continue
+			}
+
+			log.Printf("Invalid first header: %#v", header)
+			break
+		}
+
+		if header.Op == producer.ProduceOp {
+			r, err := unmarshalRequest(header, conn)
+			if err != nil {
+				log.Printf("Reading body from client failed: %s", err)
+				break
+			}
+			requests <- *r
+			responses <- createResponse(header, producer.ProduceResponseOp)
+			continue
+		}
+
+		panic("Received invalid operation in test server")
+	}
+
+	_ = conn.Close()
+}
+
+func sendResponses(conn net.Conn, responses chan []byte) {
+	for res := range responses {
+		_, err := conn.Write(res)
+		if err != nil {
+			log.Printf("Write to client failed: %s", err)
+			break
+		}
+	}
+
+	_ = conn.Close()
+}
+
+func createResponse(req *producer.BinaryHeader, op producer.OpCode) []byte {
+	buf := new(bytes.Buffer)
+	producer.WriteHeader(buf, &producer.BinaryHeader{
+		Version:    1,
+		Flags:      0,
+		StreamId:   req.StreamId,
+		Op:         op,
+		BodyLength: 0,
+		Crc:        0,
+	})
+	return buf.Bytes()
+}
+
+func unmarshalRequest(header *producer.BinaryHeader, conn net.Conn) (*produceRequest, error) {
+	bodyBuf := make([]byte, header.BodyLength)
+	_, err := io.ReadFull(conn, bodyBuf)
+	if err != nil {
+		return nil, err
+	}
+	partitionKey, index := readString(0, bodyBuf)
+	topic, index := readString(index, bodyBuf)
+	messageLength := int(producer.Endianness.Uint32(bodyBuf[index:]))
+	index += 4
+
+	return &produceRequest{
+		topic:        topic,
+		message:      string(bodyBuf[index : index+messageLength]),
+		partitionKey: partitionKey,
+	}, nil
+}
+
+func readString(index int, buf []byte) (string, int) {
+	length := int(buf[index])
+	end := index + 1 + length
+	return string(buf[index+1 : end]), end
+}
+
+type produceRequest struct {
+	topic        string
+	message      string
+	partitionKey string
 }
 
 func NewDiscoveryServer(topology Topology) *httptest.Server {
@@ -291,10 +455,8 @@ func NewDiscoveryServer(topology Topology) *httptest.Server {
 }
 
 func produceJson(client *Client, message string, partitionKey string) {
-	resp, err := client.ProduceJson("abc", strings.NewReader(message), partitionKey)
+	err := client.ProduceJson(topicName, strings.NewReader(message), partitionKey)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(resp.StatusCode).To(Equal(http.StatusOK))
-	Expect(respBody(resp)).To(Equal("OK"))
 }
 
 func respBody(resp *http.Response) string {
@@ -310,8 +472,8 @@ func reqBody(req *http.Request) string {
 	return string(body)
 }
 
-func drainChan(c chan string) []string {
-	result := make([]string, 0)
+func drainChan(c chan produceRequest) []produceRequest {
+	result := make([]produceRequest, 0)
 	hasData := true
 	for hasData {
 		select {
@@ -325,22 +487,23 @@ func drainChan(c chan string) []string {
 }
 
 // Returns a connected client
-func newTestClient(discoveryAddress string) *Client {
+func newTestClient(discoveryAddress string, withProducer bool) *Client {
 	options := ClientOptions{
 		Logger:                 types.StdLogger,
 		FixedReconnectionDelay: reconnectionDelay,
+		ProducerInitialize:     withProducer,
 	}
 	client, err := NewClient(fmt.Sprintf("polar://%s", discoveryAddress), &options)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(client.Connect()).NotTo(HaveOccurred())
 	return client
 }
 
 func newTestTopology() Topology {
 	return Topology{
-		Length:       3,
-		BrokerNames:  []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"},
-		ProducerPort: 8091,
-		ConsumerPort: 8092,
+		Length:             3,
+		BrokerNames:        []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"},
+		ProducerPort:       8091,
+		ConsumerPort:       8092,
+		ProducerBinaryPort: 8093,
 	}
 }

@@ -11,12 +11,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/polarstreams/go-client/internal/serialization"
+	"github.com/polarstreams/go-client/internal/serialization/producer"
 	"github.com/polarstreams/go-client/internal/utils"
 	. "github.com/polarstreams/go-client/types"
 	"golang.org/x/net/context"
@@ -27,7 +29,7 @@ const DefaultTopologyPollInterval = 10 * time.Second
 const defaultPollReqInterval = 5 * time.Second
 const baseReconnectionDelay = 100 * time.Millisecond
 const maxReconnectionDelay = 2 * time.Minute
-const maxOrdinal = 1 << 31
+const maxAtomicIncrement = 1 << 31
 const defaultDiscoveryPort = 9250
 const producerMaxConnsPerHost = 1
 
@@ -40,7 +42,7 @@ const (
 
 type Client struct {
 	discoveryClient        *http.Client
-	producerClient         *http.Client
+	producerClient         *producerClient
 	consumerClient         *http.Client
 	discoveryUrl           string // The full discovery url, like http://host:port/path
 	discoveryHost          string // The host and port
@@ -59,9 +61,12 @@ type Client struct {
 }
 
 type ClientOptions struct {
-	Logger                 Logger
-	TopologyPollInterval   time.Duration
-	FixedReconnectionDelay time.Duration
+	Logger                      Logger
+	TopologyPollInterval        time.Duration
+	FixedReconnectionDelay      time.Duration
+	ProducerInitialize          bool
+	ProducerFlushThresholdBytes int
+	ProducerConnectionsPerHost  int
 }
 
 var jitterRng = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -111,15 +116,27 @@ func NewClient(serviceUrl string, options *ClientOptions) (*Client, error) {
 		fixedReconnectionDelay: options.FixedReconnectionDelay,
 	}
 
-	client.producerClient = &http.Client{
-		Transport: &http.Transport{
-			MaxConnsPerHost:     producerMaxConnsPerHost,
-			MaxIdleConnsPerHost: producerMaxConnsPerHost,
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return client.dial(network, addr, client.getProducerStatus(addr))
-			},
-		},
-		Timeout: 1 * time.Second,
+	topology, err := client.queryTopology()
+	if err != nil {
+		return nil, err
+	}
+	options.Logger.Info("Discovered cluster composed of %d brokers", topology.Length)
+
+	if topology.ProducerBinaryPort == 0 {
+		return nil, fmt.Errorf("Invalid server version, make sure you use the latest polar version")
+	}
+
+	client.topology.Store(topology)
+	go client.pollTopology()
+
+	if options.ProducerInitialize {
+		// The producer client eagerly creates connections
+		client.producerClient = newProducerClient(
+			topology,
+			options.ProducerConnectionsPerHost,
+			options.ProducerFlushThresholdBytes,
+			options.FixedReconnectionDelay,
+			options.Logger)
 	}
 
 	client.consumerClient = &http.Client{
@@ -143,7 +160,7 @@ func NewClient(serviceUrl string, options *ClientOptions) (*Client, error) {
 }
 
 func (c *Client) dial(network string, addr string, brokerStatus *BrokerStatusInfo) (*utils.TrackedConnection, error) {
-	c.logger.Info("Creating new connection to %s", addr)
+	c.logger.Info("Creating new consumer connection to %s", addr)
 	conn, err := net.Dial(network, addr)
 	if err != nil {
 		c.logger.Warn("Connection to %s could not be established", addr)
@@ -167,22 +184,8 @@ func (c *Client) dial(network string, addr string, brokerStatus *BrokerStatusInf
 	return tc, nil
 }
 
-// Gets the topology the first time and starts the loop for polling for changes.
-//
-// Close() should be called to stop polling.
-func (c *Client) Connect() error {
-	topology, err := c.queryTopology()
-	if err != nil {
-		return err
-	}
-
-	c.topology.Store(topology)
-	go c.pollTopology()
-	return nil
-}
-
-func (c *Client) isProducerUp(ordinal int, t *Topology) bool {
-	return c.getProducerStatusByOrdinal(ordinal, t).IsUp()
+func (c *Client) isProducerUp(ordinal int) bool {
+	return c.producerClient.IsProducerUp(ordinal)
 }
 
 func (c *Client) getProducerStatusByOrdinal(ordinal int, t *Topology) *BrokerStatusInfo {
@@ -296,11 +299,17 @@ func (c *Client) pollTopology() {
 		time.Sleep(jitter(c.topologyPollInterval))
 		newTopology, err := c.queryTopology()
 		if err != nil {
-			// TODO: Use logging
+			c.logger.Warn("Error while trying to get the topology: %s", err)
 			continue
 		}
-
-		c.topology.Store(newTopology)
+		currentTopology := c.Topology()
+		if !reflect.DeepEqual(*newTopology, *currentTopology) {
+			c.topology.Store(newTopology)
+			c.logger.Info("Topology changed: %d brokers", newTopology.Length)
+			if c.producerClient != nil {
+				c.producerClient.OnNewTopology(newTopology)
+			}
+		}
 	}
 }
 
@@ -336,14 +345,15 @@ func (c *Client) useDiscoveryHostForBroker(t *Topology) Topology {
 	}
 
 	return Topology{
-		Length:       1,
-		BrokerNames:  []string{name},
-		ProducerPort: t.ProducerPort,
-		ConsumerPort: t.ConsumerPort,
+		Length:             1,
+		BrokerNames:        []string{name},
+		ProducerPort:       t.ProducerPort,
+		ConsumerPort:       t.ConsumerPort,
+		ProducerBinaryPort: t.ProducerBinaryPort,
 	}
 }
 
-func (c *Client) ProduceJson(topic string, message io.Reader, partitionKey string) (*http.Response, error) {
+func (c *Client) ProduceJson(topic string, message io.Reader, partitionKey string) error {
 	t := c.Topology()
 	ordinal := 0
 	if partitionKey == "" {
@@ -356,36 +366,38 @@ func (c *Client) ProduceJson(topic string, message io.Reader, partitionKey strin
 	initialPosition, err := bufferedMessage.Seek(0, io.SeekCurrent)
 	if err != nil {
 		// Seeking current position should be a safe operation, in any case, error out
-		return nil, err
+		return err
 	}
 
 	maxAttempts := int(math.Min(float64(t.Length), 4))
+	var lastErr error
 	for i := 0; i < maxAttempts; i++ {
 		if i > 0 {
 			// Rewind the reader
 			_, err := bufferedMessage.Seek(initialPosition, io.SeekStart)
 			if err != nil {
-				return nil, err
+				return err
 			}
 		}
 		brokerOrdinal := (ordinal + i) % t.Length
 
-		if !c.isProducerUp(brokerOrdinal, t) {
+		if !c.producerClient.IsProducerUp(brokerOrdinal) {
 			c.logger.Debug("B%d is down, moving to next host", brokerOrdinal)
+			lastErr = fmt.Errorf("Broker B%d is down", brokerOrdinal)
 		}
 
-		url := t.ProducerUrl(topic, brokerOrdinal, partitionKey)
-		req, err := http.NewRequest(http.MethodPost, url, bufferedMessage)
-		if err != nil {
-			return nil, err
+		resp := c.producerClient.Send(brokerOrdinal, topic, bufferedMessage, partitionKey)
+		if resp.Op() == producer.ProduceResponseOp {
+			// Success
+			return nil
 		}
-		req.Header.Set("Content-Type", contentType)
-		resp, err := c.producerClient.Do(req)
-		if err == nil {
-			return resp, nil
+		if resp.Op() == producer.ErrorOp {
+			lastErr = resp.(*producer.ErrorResponse).ToError()
+			continue
 		}
+		lastErr = fmt.Errorf("Response op is not valid: %d", resp.Op())
 	}
-	return nil, fmt.Errorf("No broker available: attempted %d brokers", maxAttempts)
+	return fmt.Errorf("No broker available: %d attempted, last error: %s", maxAttempts, lastErr)
 }
 
 func (c *Client) RegisterAsConsumer(options ConsumerOptions) {
@@ -574,8 +586,10 @@ func (c *Client) Close() {
 	c.logger.Info("PolarStreams client closing")
 	atomic.StoreInt64(&c.isClosing, 1)
 	c.discoveryClient.CloseIdleConnections()
-	c.producerClient.CloseIdleConnections()
 	c.consumerClient.CloseIdleConnections()
+	if c.producerClient != nil {
+		c.producerClient.Close()
+	}
 }
 
 func bodyClose(r *http.Response) {
@@ -586,7 +600,7 @@ func bodyClose(r *http.Response) {
 
 func (c *Client) getNextOrdinal(index *uint32, t *Topology) int {
 	value := atomic.AddUint32(index, 1)
-	if value >= maxOrdinal {
+	if value >= maxAtomicIncrement {
 		// Atomic inc operations don't wrap around.
 		// Not exactly fair when value >= maxOrdinal, but in practical terms is good enough
 		atomic.StoreUint32(index, 0)
@@ -616,5 +630,11 @@ func setDefaultOptions(options *ClientOptions) {
 	}
 	if options.TopologyPollInterval == 0 {
 		options.TopologyPollInterval = DefaultTopologyPollInterval
+	}
+	if options.ProducerConnectionsPerHost == 0 {
+		options.ProducerConnectionsPerHost = 1
+	}
+	if options.ProducerFlushThresholdBytes == 0 {
+		options.ProducerFlushThresholdBytes = 64 * 1024
 	}
 }

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/google/uuid"
 	. "github.com/polarstreams/go-client/internal"
 	. "github.com/polarstreams/go-client/types"
-	"github.com/google/uuid"
 )
 
 // Represents a PolarStreams client that reads records from a cluster.
@@ -62,10 +62,6 @@ func NewConsumerWithOpts(serviceUrl string, options ConsumerOptions) (Consumer, 
 
 	client, err := NewClient(serviceUrl, fromConsumerOptions(&options))
 	if err != nil {
-		return nil, err
-	}
-
-	if err := client.Connect(); err != nil {
 		return nil, err
 	}
 
