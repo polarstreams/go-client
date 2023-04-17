@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/google/uuid v1.3.0
-	github.com/klauspost/compress v1.15.15
+	github.com/klauspost/compress v1.16.5
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.19.0
 	golang.org/x/net v0.0.0-20220225172249-27dd8689420f
