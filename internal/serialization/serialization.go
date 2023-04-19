@@ -66,7 +66,9 @@ func ReadOkResponse(resp *http.Response) ([]TopicRecords, error) {
 	if resp.ContentLength < 2 || resp.Header.Get("Content-Type") != consumerContentType {
 		return nil, nil
 	}
-	binary.Read(resp.Body, endianness, &messageLength)
+	if err := binary.Read(resp.Body, endianness, &messageLength); err != nil {
+		return nil, err
+	}
 	result := make([]TopicRecords, 0)
 	for i := 0; i < int(messageLength); i++ {
 		item, err := unmarshalTopicRecords(resp.Body)
@@ -115,6 +117,9 @@ func unmarshalRecord(r io.Reader, offset int64) (Record, error) {
 	result.Offset = offset
 
 	err = binary.Read(r, endianness, &length)
+	if err != nil {
+		return result, err
+	}
 	body := make([]byte, length)
 	n, err := r.Read(body)
 	if err != nil {

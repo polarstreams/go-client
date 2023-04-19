@@ -17,7 +17,6 @@ type ErrorCode uint8
 
 // The only responses with body are errors, leave 511 for the error message
 const ResponseBodyMaxLength = 512
-const noStreamId = 0xFFFFFFFF
 
 var Endianness = binary.BigEndian
 

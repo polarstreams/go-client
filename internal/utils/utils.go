@@ -32,7 +32,7 @@ func ToReadSeeker(r io.Reader) types.FixedLengthReader {
 	}
 
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	bufSlice := buf.Bytes()
 
 	return bytes.NewReader(bufSlice)
