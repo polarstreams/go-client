@@ -261,7 +261,6 @@ func (c *connection) sendRequests() {
 		if w.Len() > 0 {
 			if _, err := c.conn.Write(w.Bytes()); err != nil {
 				c.logger.Warn("There was an error while writing to a producer server, closing connection: %s", err)
-				shouldExit = true
 				break
 			}
 		}

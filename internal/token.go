@@ -40,10 +40,3 @@ func GetTokenAtIndex(length int, index int) Token {
 func getRingFactor(ringSize int) int64 {
 	return int64(maxRingSize / ringSize)
 }
-
-func absInt64(num Token) int64 {
-	if num < 0 {
-		return -int64(num)
-	}
-	return int64(num)
-}

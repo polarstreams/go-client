@@ -31,7 +31,6 @@ const baseReconnectionDelay = 100 * time.Millisecond
 const maxReconnectionDelay = 2 * time.Minute
 const maxAtomicIncrement = 1 << 31
 const defaultDiscoveryPort = 9250
-const producerMaxConnsPerHost = 1
 
 const (
 	discoveryUrl            = "/v1/brokers"
@@ -51,7 +50,6 @@ type Client struct {
 	isRegistering          int64
 	topologyPollInterval   time.Duration
 	producerIndex          uint32
-	consumerIndex          uint32
 	producersStatus        *utils.CopyOnWriteMap
 	consumerStatus         *utils.CopyOnWriteMap
 	lastConsumerError      int64
@@ -184,15 +182,18 @@ func (c *Client) dial(network string, addr string, brokerStatus *BrokerStatusInf
 	return tc, nil
 }
 
+//nolint:golint,unused
 func (c *Client) isProducerUp(ordinal int) bool {
 	return c.producerClient.IsProducerUp(ordinal)
 }
 
+//nolint:golint,unused
 func (c *Client) getProducerStatusByOrdinal(ordinal int, t *Topology) *BrokerStatusInfo {
 	key := fmt.Sprintf("%s:%d", t.hostName(ordinal), t.ProducerPort)
 	return c.getProducerStatus(key)
 }
 
+//nolint:golint,unused
 func (c *Client) getProducerStatus(key string) *BrokerStatusInfo {
 	v, _, _ := c.producersStatus.LoadOrStore(key, func() (interface{}, error) {
 		return NewBrokerStatusInfo(), nil
@@ -200,10 +201,12 @@ func (c *Client) getProducerStatus(key string) *BrokerStatusInfo {
 	return v.(*BrokerStatusInfo)
 }
 
+//nolint:golint,unused
 func (c *Client) isConsumerUp(ordinal int, t *Topology) bool {
 	return c.getConsumerStatusByOrdinal(ordinal, t).IsUp()
 }
 
+//nolint:golint,unused
 func (c *Client) getConsumerStatusByOrdinal(ordinal int, t *Topology) *BrokerStatusInfo {
 	key := fmt.Sprintf("%s:%d", t.hostName(ordinal), t.ConsumerPort)
 	return c.getConsumerStatus(key)
@@ -384,6 +387,7 @@ func (c *Client) ProduceJson(topic string, message io.Reader, partitionKey strin
 		if !c.producerClient.IsProducerUp(brokerOrdinal) {
 			c.logger.Debug("B%d is down, moving to next host", brokerOrdinal)
 			lastErr = fmt.Errorf("Broker B%d is down", brokerOrdinal)
+			continue
 		}
 
 		resp := c.producerClient.Send(brokerOrdinal, topic, bufferedMessage, partitionKey)
